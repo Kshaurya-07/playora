@@ -3,6 +3,7 @@ import {
   buildInvitePath,
   classifyDrift,
   getAdapterMode,
+  getYouTubeVideoId,
   projectPosition,
 } from "../shared/watch-party";
 
@@ -12,6 +13,12 @@ describe("watch party synchronization helpers", () => {
     expect(getAdapterMode(" Twitch ")).toBe("automatic");
     expect(getAdapterMode("Netflix")).toBe("manual");
     expect(getAdapterMode("JioHotstar")).toBe("manual");
+  });
+
+  it("extracts IDs from supported YouTube URL shapes", () => {
+    expect(getYouTubeVideoId("https://www.youtube.com/watch?v=M7lc1UVf-VE")).toBe("M7lc1UVf-VE");
+    expect(getYouTubeVideoId("https://youtu.be/M7lc1UVf-VE")).toBe("M7lc1UVf-VE");
+    expect(getYouTubeVideoId("https://example.com/video/M7lc1UVf-VE")).toBeNull();
   });
 
   it("classifies drift using the product thresholds", () => {

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { getYouTubeVideoId } from "../../../shared/watch-party";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,6 +48,33 @@ import {
 
 type Platform = "YouTube" | "Twitch" | "Netflix" | "Generic web";
 type Tab = "chat" | "people";
+
+type YouTubePlayer = {
+  playVideo: () => void;
+  pauseVideo: () => void;
+  mute: () => void;
+  unMute: () => void;
+  isMuted: () => boolean;
+  seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
+  getCurrentTime: () => number;
+  getPlayerState: () => number;
+  destroy: () => void;
+};
+
+type YouTubeApi = {
+  Player: new (element: HTMLElement | string, options: {
+    videoId: string;
+    playerVars: Record<string, number>;
+    events: { onReady: () => void; onStateChange: (event: { data: number }) => void };
+  }) => YouTubePlayer;
+};
+
+declare global {
+  interface Window {
+    YT?: YouTubeApi;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
 
 type Member = {
   name: string;
@@ -186,7 +214,7 @@ function Landing({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => voi
 function CreateRoom({ onBack, onCreated }: { onBack: () => void; onCreated: (name: string, platform: Platform, url: string) => void }) {
   const [roomName, setRoomName] = useState("Friday Movie Night");
   const [platform, setPlatform] = useState<Platform>("YouTube");
-  const [url, setUrl] = useState("https://youtube.com/watch?v=...");
+  const [url, setUrl] = useState("https://www.youtube.com/watch?v=M7lc1UVf-VE");
   const [privacy, setPrivacy] = useState("Invite only");
   return <div className="playora-shell relative min-h-screen overflow-hidden"><div className="noise-overlay" /><div className="mx-auto max-w-[900px] px-6 py-7 lg:px-8"><div className="flex items-center justify-between"><button onClick={onBack} className="btn-press inline-flex items-center gap-2 text-xs font-bold text-[#9da5b6] hover:text-white"><ChevronLeft size={16} /> Back to PlayOra</button><Brand /></div><div className="mx-auto mt-16 max-w-[660px]"><div className="mb-8"><p className="font-mono text-[10px] uppercase tracking-[.2em] text-[#d6ff3f]">New room</p><h1 className="mt-3 text-4xl font-extrabold tracking-[-.06em] text-white md:text-5xl">Set the scene.</h1><p className="mt-3 text-sm text-[#8e96a7]">Pick a room name, share what you’re watching, and send the invite.</p></div><div className="glass rounded-3xl border border-white/[.1] p-5 md:p-8"><label className="block text-[11px] font-bold uppercase tracking-[.12em] text-[#858d9e]">Room name</label><Input value={roomName} onChange={e => setRoomName(e.target.value)} className="mt-2 h-12 border-white/[.1] bg-black/20 text-sm text-white placeholder:text-[#5e6575]" /><label className="mt-7 block text-[11px] font-bold uppercase tracking-[.12em] text-[#858d9e]">Where are you watching?</label><div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">{platforms.map(({ label, icon: PlatformIcon, tint }) => <button key={label} onClick={() => setPlatform(label)} className={`btn-press flex h-16 flex-col items-center justify-center gap-1.5 rounded-xl border text-[10px] font-bold ${platform === label ? "border-[#d6ff3f]/50 bg-[#d6ff3f]/10 text-white" : "border-white/[.08] bg-white/[.025] text-[#8991a2] hover:bg-white/[.06]"}`}><PlatformIcon size={17} style={{ color: tint }} />{label}</button>)}</div><label className="mt-7 block text-[11px] font-bold uppercase tracking-[.12em] text-[#858d9e]">Content URL <span className="font-normal normal-case tracking-normal text-[#5f6778]">(optional for manual sync)</span></label><div className="relative mt-2"><Link2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#697183]" /><Input value={url} onChange={e => setUrl(e.target.value)} className="h-12 border-white/[.1] bg-black/20 pl-9 text-sm text-white placeholder:text-[#5e6575]" /></div><div className="mt-7 grid gap-3 sm:grid-cols-2"><div><label className="block text-[11px] font-bold uppercase tracking-[.12em] text-[#858d9e]">Room privacy</label><button onClick={() => setPrivacy(privacy === "Invite only" ? "Anyone with link" : "Invite only")} className="mt-2 flex h-11 w-full items-center justify-between rounded-xl border border-white/[.1] bg-white/[.025] px-3 text-xs font-semibold text-white"><span className="flex items-center gap-2"><Lock size={14} className="text-[#d6ff3f]" /> {privacy}</span><ChevronDown size={14} className="text-[#6e7688]" /></button></div><div><label className="block text-[11px] font-bold uppercase tracking-[.12em] text-[#858d9e]">Playback control</label><button className="mt-2 flex h-11 w-full items-center justify-between rounded-xl border border-white/[.1] bg-white/[.025] px-3 text-xs font-semibold text-white"><span className="flex items-center gap-2"><Users size={14} className="text-[#9eacff]" /> Host only</span><ChevronDown size={14} className="text-[#6e7688]" /></button></div></div><div className="mt-8 flex flex-col-reverse gap-3 border-t border-white/[.08] pt-6 sm:flex-row sm:justify-end"><Button onClick={onBack} variant="outline" className="btn-press h-11 rounded-xl border-white/[.1] bg-white/[.02] text-xs font-bold text-white hover:bg-white/[.07]">Cancel</Button><Button onClick={() => onCreated(roomName || "Movie Night", platform, url)} className="btn-press h-11 rounded-xl bg-[#d6ff3f] px-5 text-xs font-extrabold text-[#10150d] hover:bg-[#e1ff70]">Create party <ArrowRight size={15} className="ml-2" /></Button></div></div><div className="mt-5 flex items-start gap-2 rounded-xl border border-[#d6ff3f]/10 bg-[#d6ff3f]/[.035] p-3 text-[10px] leading-5 text-[#8f987e]"><Sparkles size={14} className="mt-0.5 shrink-0 text-[#d6ff3f]" /><span>PlayOra never downloads, records, or proxies the content. Everyone watches from their own legitimate service while we sync the moment.</span></div></div></div></div>;
 }
@@ -198,6 +226,8 @@ function InviteModal({ onClose, onCopied }: { onClose: () => void; onCopied: () 
 
 function WatchRoom({ roomName, platform, url, onLeave }: { roomName: string; platform: Platform; url: string; onLeave: () => void }) {
   const [playing, setPlaying] = useState(true);
+  const [playerReady, setPlayerReady] = useState(false);
+  const playerRef = useRef<YouTubePlayer | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<Tab>("chat");
@@ -206,16 +236,57 @@ function WatchRoom({ roomName, platform, url, onLeave }: { roomName: string; pla
   const [members, setMembers] = useState(initialMembers);
   const [reaction, setReaction] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(5072);
+  const [roomPosition, setRoomPosition] = useState(5072);
   const [joinedVoice, setJoinedVoice] = useState(true);
   const [muted, setMuted] = useState(false);
   const [synced, setSynced] = useState(true);
+  const videoId = platform === "YouTube" ? getYouTubeVideoId(url) : null;
   const [mobilePanel, setMobilePanel] = useState<"none" | Tab>("none");
 
   useEffect(() => {
+    if (platform !== "YouTube" || !videoId) return;
+    const mountPlayer = () => {
+      if (!window.YT?.Player || playerRef.current) return;
+      playerRef.current = new window.YT.Player("playora-youtube-player", {
+        videoId,
+        playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+        events: {
+          onReady: () => { setPlayerReady(true); setPlaying(false); },
+          onStateChange: event => {
+            if (event.data === 1) setPlaying(true);
+            if (event.data === 2 || event.data === 0) setPlaying(false);
+          },
+        },
+      });
+    };
+    if (window.YT?.Player) mountPlayer();
+    else {
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      window.onYouTubeIframeAPIReady = mountPlayer;
+      document.body.appendChild(script);
+    }
+    return () => {
+      if (window.onYouTubeIframeAPIReady === mountPlayer) window.onYouTubeIframeAPIReady = undefined;
+      playerRef.current?.destroy();
+      playerRef.current = null;
+      setPlayerReady(false);
+    };
+  }, [platform, videoId]);
+
+  useEffect(() => {
+    if (platform === "YouTube" && playerReady && playerRef.current) {
+      const id = window.setInterval(() => {
+        const current = playerRef.current?.getCurrentTime();
+        if (typeof current === "number") setSeconds(Math.floor(current));
+      }, 500);
+      return () => window.clearInterval(id);
+    }
     if (!playing) return;
     const id = window.setInterval(() => setSeconds(value => value + 1), 1000);
     return () => window.clearInterval(id);
-  }, [playing]);
+  }, [platform, playerReady, playing]);
 
   const currentTime = useMemo(() => `${Math.floor(seconds / 3600)}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`, [seconds]);
   const sendMessage = () => {
@@ -225,17 +296,42 @@ function WatchRoom({ roomName, platform, url, onLeave }: { roomName: string; pla
     setMessage("");
   };
   const triggerReaction = (emoji: string) => { setReaction(emoji); window.setTimeout(() => setReaction(null), 2100); toast.success(`Sent ${emoji} to the room`); };
-  const syncNow = () => { setSynced(true); setSeconds(value => value + 1); toast.success("You’re back in sync", { description: "Playback aligned to the room." }); };
+  const togglePlayback = () => {
+    if (playerRef.current) {
+      if (playing) playerRef.current.pauseVideo();
+      else playerRef.current.playVideo();
+    }
+    setPlaying(value => !value);
+  };
+  const toggleMute = () => {
+    if (playerRef.current) {
+      if (playerRef.current.isMuted()) playerRef.current.unMute();
+      else playerRef.current.mute();
+    }
+    setMuted(value => !value);
+  };
+  const syncNow = () => {
+    if (playerRef.current) playerRef.current.seekTo(roomPosition, true);
+    setSeconds(roomPosition);
+    setSynced(true);
+    toast.success("You’re back in sync", { description: "Playback aligned to the room." });
+  };
+  const simulateDrift = () => {
+    const target = Math.max(0, seconds - 3);
+    setRoomPosition(target);
+    setSynced(false);
+    toast.info("Simulated 3s of room drift", { description: "Use Sync now to seek the player back to the room target." });
+  };
   const copyInvite = () => { navigator.clipboard?.writeText("https://playora.app/party/FRI5NITE"); toast.success("Invite link copied"); };
 
   return <div className="playora-shell flex min-h-screen flex-col overflow-hidden"><div className="noise-overlay" />
     <header className="relative z-20 flex h-[68px] shrink-0 items-center justify-between border-b border-white/[.08] bg-[#0e1016]/90 px-4 backdrop-blur-xl lg:px-7"><div className="flex items-center gap-5"><Brand /><span className="hidden h-5 w-px bg-white/[.12] sm:block" /><div className="hidden items-center gap-2 sm:flex"><div className="h-2 w-2 rounded-full bg-[#d6ff3f] status-pulse" /><span className="max-w-[180px] truncate text-xs font-bold text-white">{roomName}</span><span className="rounded bg-white/[.07] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[.08em] text-[#8c94a5]">{platform}</span></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 text-[10px] font-bold text-[#7f8798] md:flex"><Users size={13} /> {members.length} watching</span><IconButton label="Invite friends" onClick={() => setShowInvite(true)}><Share2 size={15} /></IconButton><IconButton label="Room settings" active={showSettings} onClick={() => setShowSettings(!showSettings)}><Settings2 size={15} /></IconButton><Avatar member={{ initials: "YO", color: "#8eabe9" }} small /></div></header>
     {showSettings && <div className="absolute right-4 top-[58px] z-30 w-[238px] rounded-2xl border border-white/[.12] bg-[#181b25] p-2 shadow-2xl"><p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[.14em] text-[#6e7688]">Room controls</p>{["Host-only playback control", "Lock seeking", "Allow reactions", "Allow voice"].map((setting, index) => <button key={setting} onClick={() => toast.success(`${setting} ${index === 0 ? "enabled" : "updated"}`)} className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold text-[#c8ced9] hover:bg-white/[.06]"><span>{setting}</span><span className={`h-4 w-7 rounded-full p-0.5 ${index === 1 ? "bg-white/[.13]" : "bg-[#d6ff3f]"}`}><span className={`block h-3 w-3 rounded-full ${index === 1 ? "bg-[#848c9d]" : "ml-3 bg-[#10150d]"}`} /></span></button>)}<button onClick={onLeave} className="mt-1 w-full rounded-lg border-t border-white/[.08] px-3 py-2.5 text-left text-[11px] font-bold text-[#ff8181] hover:bg-[#ff5d5d]/[.08]">Leave room</button></div>}
 
-    <main className="relative z-10 mx-auto flex w-full max-w-[1500px] flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[minmax(0,1fr)_350px] lg:p-5"><section className="min-w-0"><div className="relative aspect-video min-h-[260px] overflow-hidden rounded-2xl border border-white/[.1] bg-[#151a2a] shadow-[0_25px_90px_rgba(0,0,0,.3)] lg:aspect-[16/8.7]"><div className="absolute inset-0 bg-[radial-gradient(circle_at_54%_22%,rgba(228,198,138,.48),transparent_19%),radial-gradient(circle_at_22%_60%,rgba(59,95,151,.34),transparent_31%),linear-gradient(130deg,#293553_0%,#101722_53%,#080a0e_100%)]" /><div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(4,6,10,.88),transparent_60%)]" /><div className="absolute left-6 top-6 flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-2.5 py-1.5 text-[9px] font-bold text-white/75 backdrop-blur-md"><Youtube size={13} className="text-[#ff6a6a]" /> {platform === "YouTube" ? "YouTube" : "Manual sync mode"}<span className="ml-1 text-white/30">•</span><span className="text-[#d6ff3f]">LIVE TO ROOM</span></div><div className="absolute left-7 top-[31%] max-w-[320px] md:left-12"><p className="font-mono text-[9px] uppercase tracking-[.22em] text-white/60">The Art of Slow Cinema</p><h1 className="mt-2 text-2xl font-extrabold leading-[.98] tracking-[-.05em] text-white md:text-5xl">A quiet frame<br />can say everything.</h1><p className="mt-4 hidden max-w-[285px] text-[11px] leading-5 text-white/55 md:block">An evening of considered images, lingering light, and stories that take their time.</p></div><div className="absolute bottom-5 left-5 right-5 md:bottom-7 md:left-8 md:right-8"><div className="mb-2 h-1 rounded-full bg-white/20"><div className="h-full w-[64%] rounded-full bg-[#d6ff3f] shadow-[0_0_12px_rgba(214,255,63,.5)]" /></div><div className="flex items-center justify-between font-mono text-[9px] text-white/60"><span>{currentTime}</span><span>2:05:18</span></div></div>{reaction && <div className="reaction-pop absolute bottom-[32%] right-[15%] text-4xl">{reaction}</div>}<button onClick={() => setPlaying(!playing)} aria-label={playing ? "Pause playback" : "Play playback"} className="btn-press absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white shadow-2xl backdrop-blur-md transition hover:scale-105 hover:bg-black/40">{playing ? <Pause size={23} fill="currentColor" /> : <Play size={23} fill="currentColor" className="ml-1" />}</button></div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[.08] bg-[#11141c] px-3 py-2.5"><div className="flex items-center gap-1.5"><button onClick={() => setPlaying(!playing)} className="btn-press inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#d6ff3f] px-3 text-[10px] font-extrabold text-[#10150d] hover:bg-[#e1ff70]">{playing ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />} {playing ? "Pause" : "Play"}</button><IconButton label="Mute player"><Volume2 size={14} /></IconButton><span className="mx-1 h-4 w-px bg-white/[.1]" /><button onClick={syncNow} className="btn-press inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#d6ff3f]/25 bg-[#d6ff3f]/[.07] px-3 text-[10px] font-bold text-[#d6ff3f] hover:bg-[#d6ff3f]/[.13]"><Zap size={12} /> Sync now</button></div><div className="flex items-center gap-2"><div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[9px] font-bold ${synced ? "bg-[#d6ff3f]/[.08] text-[#d6ff3f]" : "bg-[#ffba5d]/[.1] text-[#ffba5d]"}`}><span className={`h-1.5 w-1.5 rounded-full ${synced ? "bg-[#d6ff3f]" : "bg-[#ffba5d]"}`} /> {synced ? "Synced" : "Slight drift"}</div><button onClick={() => toast.info("Opening the content on your device", { description: url || "Open the selected service and press play." })} className="btn-press hidden h-8 items-center gap-1.5 rounded-lg border border-white/[.09] px-2.5 text-[10px] font-semibold text-[#aeb5c4] hover:bg-white/[.06] sm:inline-flex">Open source <SquareArrowOutUpRight size={12} /></button></div></div>
+    <main className="relative z-10 mx-auto flex w-full max-w-[1500px] flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[minmax(0,1fr)_350px] lg:p-5"><section className="min-w-0"><div className="relative aspect-video min-h-[260px] overflow-hidden rounded-2xl border border-white/[.1] bg-[#151a2a] shadow-[0_25px_90px_rgba(0,0,0,.3)] lg:aspect-[16/8.7]"><div className="absolute inset-0 bg-[radial-gradient(circle_at_54%_22%,rgba(228,198,138,.48),transparent_19%),radial-gradient(circle_at_22%_60%,rgba(59,95,151,.34),transparent_31%),linear-gradient(130deg,#293553_0%,#101722_53%,#080a0e_100%)]" /><div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(4,6,10,.88),transparent_60%)]" /><div className="absolute left-6 top-6 flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-2.5 py-1.5 text-[9px] font-bold text-white/75 backdrop-blur-md"><Youtube size={13} className="text-[#ff6a6a]" /> {platform === "YouTube" ? "YouTube" : "Manual sync mode"}<span className="ml-1 text-white/30">•</span><span className="text-[#d6ff3f]">LIVE TO ROOM</span></div><div className="absolute left-7 top-[31%] max-w-[320px] md:left-12"><p className="font-mono text-[9px] uppercase tracking-[.22em] text-white/60">The Art of Slow Cinema</p><h1 className="mt-2 text-2xl font-extrabold leading-[.98] tracking-[-.05em] text-white md:text-5xl">A quiet frame<br />can say everything.</h1><p className="mt-4 hidden max-w-[285px] text-[11px] leading-5 text-white/55 md:block">An evening of considered images, lingering light, and stories that take their time.</p></div><div className="absolute bottom-5 left-5 right-5 md:bottom-7 md:left-8 md:right-8"><div className="mb-2 h-1 rounded-full bg-white/20"><div className="h-full w-[64%] rounded-full bg-[#d6ff3f] shadow-[0_0_12px_rgba(214,255,63,.5)]" /></div><div className="flex items-center justify-between font-mono text-[9px] text-white/60"><span>{currentTime}</span><span>2:05:18</span></div></div>{reaction && <div className="reaction-pop absolute bottom-[32%] right-[15%] text-4xl">{reaction}</div>}<button onClick={togglePlayback} aria-label={playing ? "Pause playback" : "Play playback"} className="btn-press absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/25 text-white shadow-2xl backdrop-blur-md transition hover:scale-105 hover:bg-black/40">{playing ? <Pause size={23} fill="currentColor" /> : <Play size={23} fill="currentColor" className="ml-1" />}</button>{platform === "YouTube" && videoId && <div className="absolute inset-0 z-10 overflow-hidden rounded-2xl bg-black"><div id="playora-youtube-player" className="h-full w-full" /><div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/60 to-transparent" /><div className="pointer-events-none absolute left-6 top-6 flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-[9px] font-bold text-white/80 backdrop-blur-md"><Youtube size={13} className="text-[#ff6666]" /> Official YouTube player <span className="text-white/30">•</span><span className="text-[#d6ff3f]">SYNC TEST</span></div></div>}</div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[.08] bg-[#11141c] px-3 py-2.5"><div className="flex items-center gap-1.5"><button onClick={togglePlayback} className="btn-press inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#d6ff3f] px-3 text-[10px] font-extrabold text-[#10150d] hover:bg-[#e1ff70]">{playing ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />} {playing ? "Pause" : "Play"}</button><IconButton label={muted ? "Unmute player" : "Mute player"} active={muted} onClick={toggleMute}><Volume2 size={14} /></IconButton><span className="mx-1 h-4 w-px bg-white/[.1]" /><button onClick={syncNow} className="btn-press inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#d6ff3f]/25 bg-[#d6ff3f]/[.07] px-3 text-[10px] font-bold text-[#d6ff3f] hover:bg-[#d6ff3f]/[.13]"><Zap size={12} /> Sync now</button></div><div className="flex items-center gap-2"><div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[9px] font-bold ${synced ? "bg-[#d6ff3f]/[.08] text-[#d6ff3f]" : "bg-[#ffba5d]/[.1] text-[#ffba5d]"}`}><span className={`h-1.5 w-1.5 rounded-full ${synced ? "bg-[#d6ff3f]" : "bg-[#ffba5d]"}`} /> {synced ? "Synced" : "Slight drift"}</div><button onClick={() => toast.info("Opening the content on your device", { description: url || "Open the selected service and press play." })} className="btn-press hidden h-8 items-center gap-1.5 rounded-lg border border-white/[.09] px-2.5 text-[10px] font-semibold text-[#aeb5c4] hover:bg-white/[.06] sm:inline-flex">Open source <SquareArrowOutUpRight size={12} /></button></div></div>
       <div className="mt-3 grid grid-cols-3 gap-2 sm:hidden"><button onClick={() => setMobilePanel("chat")} className={`rounded-xl border py-2.5 text-[10px] font-bold ${mobilePanel === "chat" ? "border-[#d6ff3f]/30 bg-[#d6ff3f]/10 text-[#d6ff3f]" : "border-white/[.08] bg-white/[.025] text-[#8f97a8]"}`}><MessageCircle size={14} className="mx-auto mb-1" />Chat</button><button onClick={() => setMobilePanel("people")} className={`rounded-xl border py-2.5 text-[10px] font-bold ${mobilePanel === "people" ? "border-[#d6ff3f]/30 bg-[#d6ff3f]/10 text-[#d6ff3f]" : "border-white/[.08] bg-white/[.025] text-[#8f97a8]"}`}><Users size={14} className="mx-auto mb-1" />People</button><button onClick={() => setJoinedVoice(!joinedVoice)} className="rounded-xl border border-white/[.08] bg-white/[.025] py-2.5 text-[10px] font-bold text-[#8f97a8]"><Mic size={14} className="mx-auto mb-1" />{joinedVoice ? "Voice on" : "Join voice"}</button></div>
-      <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[.08] bg-[#11141c] px-3 py-2"><div className="flex items-center gap-2"><span className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7789]">Quick reactions</span>{["❤️", "😂", "😭", "😱", "🔥", "👏"].map(emoji => <button key={emoji} onClick={() => triggerReaction(emoji)} className="btn-press rounded-md px-1.5 py-1 text-sm transition hover:bg-white/[.09]">{emoji}</button>)}</div><button onClick={() => setSynced(false)} className="hidden text-[10px] font-semibold text-[#727b8c] hover:text-white sm:block">Report drift</button></div></section>
+      <div className="mt-3 flex items-center justify-between rounded-xl border border-white/[.08] bg-[#11141c] px-3 py-2"><div className="flex items-center gap-2"><span className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7789]">Quick reactions</span>{["❤️", "😂", "😭", "😱", "🔥", "👏"].map(emoji => <button key={emoji} onClick={() => triggerReaction(emoji)} className="btn-press rounded-md px-1.5 py-1 text-sm transition hover:bg-white/[.09]">{emoji}</button>)}</div><button onClick={simulateDrift} className="hidden text-[10px] font-semibold text-[#727b8c] hover:text-white sm:block">Simulate drift</button></div></section>
 
       <aside className={`mobile-bottom-sheet ${mobilePanel === "none" ? "hidden" : ""} relative flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-white/[.1] bg-[#11141c] lg:flex`}><div className="flex shrink-0 items-center justify-between border-b border-white/[.08] px-4 py-3"><div className="flex gap-1 rounded-lg bg-white/[.04] p-1"><button onClick={() => setTab("chat")} className={`rounded-md px-3 py-1.5 text-[10px] font-bold ${tab === "chat" ? "bg-white/[.1] text-white" : "text-[#737c8e]"}`}><MessageCircle size={12} className="mr-1.5 inline" />Chat</button><button onClick={() => setTab("people")} className={`rounded-md px-3 py-1.5 text-[10px] font-bold ${tab === "people" ? "bg-white/[.1] text-white" : "text-[#737c8e]"}`}><Users size={12} className="mr-1.5 inline" />People <span className="ml-1 rounded bg-[#d6ff3f]/10 px-1.5 py-0.5 text-[9px] text-[#d6ff3f]">{members.length}</span></button></div><button onClick={() => setMobilePanel("none")} className="text-[#697183] hover:text-white sm:hidden"><X size={15} /></button><span className="hidden items-center gap-1.5 text-[9px] font-semibold text-[#6e7688] lg:flex"><span className="h-1.5 w-1.5 rounded-full bg-[#d6ff3f]" /> Room is live</span></div>{tab === "chat" ? <><div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-4">{messages.map(chat => <div key={chat.id} className={`flex gap-2.5 ${chat.own ? "flex-row-reverse" : ""}`}><Avatar member={chat} small /><div className={`min-w-0 ${chat.own ? "items-end text-right" : ""}`}><div className={`flex items-baseline gap-2 ${chat.own ? "flex-row-reverse" : ""}`}><span className="text-[10px] font-bold text-[#d2d7e1]">{chat.name}</span><span className="text-[9px] text-[#5f6778]">{chat.time}</span></div><div className={`mt-1 inline-block max-w-[220px] rounded-xl px-3 py-2 text-[11px] leading-4 ${chat.own ? "bg-[#d6ff3f]/10 text-[#e9f7bc]" : "bg-white/[.05] text-[#b4bbc9]"}`}>{chat.message}</div>{chat.reactions && <div className="mt-1 flex gap-1">{chat.reactions.map((item, i) => <span key={i} className="rounded-full border border-white/[.08] bg-white/[.04] px-1.5 py-0.5 text-[10px]">{item}</span>)}</div>}</div></div>)}</div><div className="border-t border-white/[.08] p-3"><div className="flex items-end gap-2 rounded-xl border border-white/[.08] bg-white/[.03] p-2"><Textarea value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Say something..." className="min-h-[32px] resize-none border-0 bg-transparent p-1.5 text-[11px] text-white shadow-none focus-visible:ring-0" rows={1} /><button onClick={sendMessage} aria-label="Send message" className="btn-press flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#d6ff3f] text-[#10150d] hover:bg-[#e1ff70]"><Send size={13} /></button></div><div className="mt-2 flex items-center justify-between px-1 text-[9px] text-[#616a7b]"><span>Enter to send</span><span>Everyone can chat</span></div></div></> : <div className="scrollbar-thin flex-1 overflow-y-auto p-3">{members.map(member => <div key={member.name} className="group flex items-center gap-3 rounded-xl p-2.5 transition hover:bg-white/[.04]"><div className="relative"><Avatar member={member} />{member.speaking && <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[#11141c] bg-[#d6ff3f] text-[#10150d]"><AudioLines size={9} /></span>}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><span className="truncate text-[11px] font-bold text-white">{member.name}</span>{member.you && <span className="rounded bg-white/[.08] px-1 py-0.5 text-[8px] text-[#8e96a7]">YOU</span>}</div><div className="mt-0.5 flex items-center gap-1.5 text-[9px] text-[#687183]"><span className="h-1.5 w-1.5 rounded-full bg-[#d6ff3f]" /> Watching · {member.watching}</div></div><div className="flex items-center gap-2 text-[#677082]">{member.role && <span className="rounded bg-[#d6ff3f]/10 px-1.5 py-1 text-[8px] font-bold text-[#d6ff3f]">{member.role}</span>}{member.mic ? <Mic size={13} className={member.speaking ? "text-[#d6ff3f]" : ""} /> : <MicOff size={13} />}</div></div>)}<div className="mt-4 rounded-xl border border-[#d6ff3f]/10 bg-[#d6ff3f]/[.035] p-3"><p className="text-[10px] font-bold text-[#d6ff3f]">Room sync health</p><div className="mt-2 flex items-end justify-between"><span className="text-lg font-extrabold text-white">98%</span><span className="text-[9px] text-[#8d967b]">excellent</span></div><div className="mt-2 h-1 rounded-full bg-white/[.08]"><div className="h-full w-[98%] rounded-full bg-[#d6ff3f]" /></div></div></div>}<div className="flex shrink-0 items-center justify-between border-t border-white/[.08] bg-[#0e1016] px-4 py-3"><div className="flex items-center gap-2"><button onClick={() => setJoinedVoice(!joinedVoice)} className={`btn-press inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold ${joinedVoice ? "bg-[#d6ff3f] text-[#10150d]" : "border border-white/[.1] bg-white/[.03] text-white"}`}><Mic size={13} /> {joinedVoice ? "Voice on" : "Join voice"}</button>{joinedVoice && <IconButton label={muted ? "Unmute microphone" : "Mute microphone"} active={muted} onClick={() => setMuted(!muted)}>{muted ? <MicOff size={14} /> : <Mic size={14} />}</IconButton>}</div><button onClick={onLeave} className="text-[10px] font-semibold text-[#6f7788] hover:text-[#ff8181]">Leave room</button></div></aside>
     </main>
@@ -247,7 +343,7 @@ export default function Home() {
   const [, params] = useRoute("/party/:code");
   const [, setLocation] = useLocation();
   const [view, setView] = useState<"landing" | "create" | "room">(params?.code ? "room" : "landing");
-  const [room, setRoom] = useState({ name: "Friday Movie Night", platform: "YouTube" as Platform, url: "https://youtube.com/watch?v=..." });
+  const [room, setRoom] = useState({ name: "Friday Movie Night", platform: "YouTube" as Platform, url: "https://www.youtube.com/watch?v=M7lc1UVf-VE" });
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCode, setJoinCode] = useState("");
 

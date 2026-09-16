@@ -136,3 +136,5 @@ button { cursor: pointer; }
   .mobile-bottom-sheet { border-radius: 1.35rem 1.35rem 0 0; }
   .mobile-hide { display: none !important; }
 }
+
+#playora-youtube-player, #playora-youtube-player iframe { width: 100%; height: 100%; border: 0; }
