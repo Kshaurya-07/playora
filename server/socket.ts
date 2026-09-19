@@ -31,6 +31,7 @@ export function initWebSocketServer(server: HttpServer) {
   const wss = new WebSocketServer({ server, path: "/api/ws" });
   const clients = new Map<WebSocket, ClientSession>();
   const rooms = new Map<string, Set<WebSocket>>();
+  const roomQueues = new Map<string, any[]>();
 
   const broadcastToRoom = (
     roomCode: string,
@@ -193,6 +194,7 @@ export function initWebSocketServer(server: HttpServer) {
               role: session.role,
               members: getRoomMembers(roomCode),
               messages: await db.getRoomMessages(room.id),
+              queue: roomQueues.get(roomCode) || [],
             })
           );
 
@@ -372,6 +374,118 @@ export function initWebSocketServer(server: HttpServer) {
             }
             count--;
           }, 1000);
+          return;
+        }
+
+        if (type === "change_content") {
+          const isHost = session.role === "host";
+          if (room.settings?.hostOnlyControls && !isHost) {
+            ws.send(JSON.stringify({ type: "error", message: "Only the host can change content." }));
+            return;
+          }
+          const contentUrl = String(data.contentUrl || "").trim();
+          const platform = String(data.platform || "generic");
+          const title = String(data.title || room.title);
+          if (!contentUrl) return;
+
+          await db.updateRoomContent(room.id, contentUrl, platform, title);
+          broadcastToRoom(roomCode, {
+            type: "content_changed",
+            contentUrl,
+            platform,
+            title,
+            currentPosition: 0,
+            isPlaying: false,
+            initiatedBy: session.userName,
+          });
+          broadcastToRoom(roomCode, {
+            type: "chat_message",
+            message: {
+              id: Date.now(),
+              senderName: "PlayOra",
+              senderColor: "#D6FF3F",
+              content: `${session.userName} changed stream to ${title}`,
+              messageType: "system",
+              createdAt: new Date().toISOString(),
+            },
+          });
+          return;
+        }
+
+        if (type === "queue_update") {
+          const queue = Array.isArray(data.queue) ? data.queue : [];
+          roomQueues.set(roomCode.toUpperCase(), queue);
+          broadcastToRoom(roomCode, {
+            type: "queue_update",
+            queue,
+          });
+          return;
+        }
+
+        if (type === "transfer_host") {
+          if (session.role !== "host") return;
+          const targetPeerId = String(data.targetPeerId || "");
+          const sockets = rooms.get(roomCode.toUpperCase());
+          if (sockets) {
+            for (const s of sockets) {
+              const targetSession = clients.get(s);
+              if (targetSession && targetSession.peerId === targetPeerId) {
+                targetSession.role = "host";
+                session.role = "participant";
+                await db.updateRoomHost(room.id, targetSession.userId);
+                broadcastToRoom(roomCode, {
+                  type: "presence_update",
+                  members: getRoomMembers(roomCode),
+                });
+                broadcastToRoom(roomCode, {
+                  type: "chat_message",
+                  message: {
+                    id: Date.now(),
+                    senderName: "PlayOra",
+                    senderColor: "#D6FF3F",
+                    content: `${targetSession.userName} is now the party host`,
+                    messageType: "system",
+                    createdAt: new Date().toISOString(),
+                  },
+                });
+                break;
+              }
+            }
+          }
+          return;
+        }
+
+        if (type === "kick_peer") {
+          if (session.role !== "host") return;
+          const targetPeerId = String(data.targetPeerId || "");
+          const sockets = rooms.get(roomCode.toUpperCase());
+          if (sockets) {
+            for (const s of sockets) {
+              const targetSession = clients.get(s);
+              if (targetSession && targetSession.peerId === targetPeerId) {
+                s.send(
+                  JSON.stringify({
+                    type: "kicked",
+                    message: "You were removed from the watch party by the host.",
+                  })
+                );
+                leaveCurrentRoom(s);
+                s.close();
+                break;
+              }
+            }
+          }
+          return;
+        }
+
+        if (type === "update_room_settings") {
+          if (session.role !== "host") return;
+          const newSettings = data.settings || {};
+          await db.updateRoomSettings(room.id, newSettings);
+          broadcastToRoom(roomCode, {
+            type: "settings_update",
+            settings: newSettings,
+          });
           return;
         }
       } catch (err) {

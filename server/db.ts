@@ -159,6 +159,32 @@ class MemoryStore {
     return room;
   }
 
+  updateRoomContent(
+    roomId: number,
+    contentUrl: string,
+    platform: string,
+    title?: string
+  ): Room | undefined {
+    const room = this.rooms.get(roomId);
+    if (!room) return undefined;
+    room.contentUrl = contentUrl;
+    room.platform = platform;
+    if (title) room.title = title;
+    room.isPlaying = false;
+    room.currentPosition = 0;
+    room.positionUpdatedAt = new Date();
+    room.updatedAt = new Date();
+    return room;
+  }
+
+  updateRoomHost(roomId: number, hostId: number): Room | undefined {
+    const room = this.rooms.get(roomId);
+    if (!room) return undefined;
+    room.hostId = hostId;
+    room.updatedAt = new Date();
+    return room;
+  }
+
   addMessage(message: InsertMessage): Message {
     const newMsg: Message = {
       id: this.nextMessageId++,
@@ -372,6 +398,44 @@ export async function updateRoomSettings(
     }
   } catch (error) {
     console.error("[Database] Failed to update room settings:", error);
+  }
+}
+
+export async function updateRoomContent(
+  roomId: number,
+  contentUrl: string,
+  platform: string,
+  title?: string
+): Promise<void> {
+  memoryStore.updateRoomContent(roomId, contentUrl, platform, title);
+  const db = await getDb();
+  if (!db) return;
+
+  try {
+    const updateData: any = {
+      contentUrl,
+      platform,
+      isPlaying: false,
+      currentPosition: 0,
+      positionUpdatedAt: new Date(),
+      updatedAt: new Date(),
+    };
+    if (title) updateData.title = title;
+    await db.update(rooms).set(updateData).where(eq(rooms.id, roomId));
+  } catch (error) {
+    console.error("[Database] Failed to update room content:", error);
+  }
+}
+
+export async function updateRoomHost(roomId: number, hostId: number): Promise<void> {
+  memoryStore.updateRoomHost(roomId, hostId);
+  const db = await getDb();
+  if (!db) return;
+
+  try {
+    await db.update(rooms).set({ hostId, updatedAt: new Date() }).where(eq(rooms.id, roomId));
+  } catch (error) {
+    console.error("[Database] Failed to update room host:", error);
   }
 }
 

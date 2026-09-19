@@ -7,6 +7,7 @@ import {
   PlatformId,
   PLATFORM_REGISTRY,
   detectPlatform,
+  resolveStreamingContent,
 } from "@shared/watch-party";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,26 @@ export default function Dashboard() {
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>("youtube");
   const [contentUrl, setContentUrl] = useState("https://www.youtube.com/watch?v=M7lc1UVf-VE");
   const [hostOnlyControls, setHostOnlyControls] = useState(true);
+
+  const templates = [
+    { label: "🎬 Movie Night", title: "Friday Movie Night", url: "https://www.youtube.com/watch?v=M7lc1UVf-VE", platform: "youtube" as PlatformId },
+    { label: "🎮 Gaming Stream", title: "Twitch Esports Party", url: "https://www.twitch.tv/twitch", platform: "twitch" as PlatformId },
+    { label: "📺 Series Marathon", title: "Stranger Things Watch Party", url: "https://www.netflix.com/title/80057281", platform: "netflix" as PlatformId },
+    { label: "🎵 Music Chill", title: "Lofi Beats Chill Room", url: "https://www.youtube.com/watch?v=jfKfPfyJRdk", platform: "youtube" as PlatformId },
+    { label: "🔴 Live Kick Stream", title: "Kick Live Community", url: "https://kick.com/xqc", platform: "kick" as PlatformId },
+  ];
+
+  const handleContentUrlChange = (val: string) => {
+    setContentUrl(val);
+    if (val.trim()) {
+      const res = resolveStreamingContent(val.trim());
+      if (res.platform !== "generic") {
+        setSelectedPlatform(res.platform);
+      }
+    }
+  };
+
+  const resolvedPreview = contentUrl.trim() ? resolveStreamingContent(contentUrl.trim()) : null;
 
   // Profile state
   const [profileName, setProfileName] = useState(user?.name || "");
@@ -430,7 +451,30 @@ export default function Dashboard() {
               Configure your room and share what you’ll be watching together.
             </p>
 
-            <div className="mt-5 space-y-4">
+            {/* Quick Templates */}
+            <div className="mt-4">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                Quick Party Templates
+              </label>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {templates.map((tpl) => (
+                  <button
+                    key={tpl.label}
+                    type="button"
+                    onClick={() => {
+                      setPartyTitle(tpl.title);
+                      setContentUrl(tpl.url);
+                      setSelectedPlatform(tpl.platform);
+                    }}
+                    className="btn-press rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-neutral-300 hover:border-[#d6ff3f]/40 hover:bg-[#d6ff3f]/10 hover:text-white transition"
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4">
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                   Party Name
@@ -464,12 +508,12 @@ export default function Dashboard() {
                         <span className="text-[11px] font-bold">{plat.name}</span>
                         <span
                           className={`mt-0.5 text-[8px] font-semibold ${
-                            plat.syncCapability === "automatic"
+                            plat.capabilities.syncCapability === "automatic"
                               ? "text-[#d6ff3f]"
                               : "text-amber-400"
                           }`}
                         >
-                          {plat.syncCapability === "automatic" ? "Auto Sync" : "Assisted"}
+                          {plat.capabilities.syncCapability === "automatic" ? "Auto Sync" : "Assisted"}
                         </span>
                       </button>
                     );
@@ -483,10 +527,21 @@ export default function Dashboard() {
                 </label>
                 <Input
                   value={contentUrl}
-                  onChange={(e) => setContentUrl(e.target.value)}
-                  placeholder="https://..."
+                  onChange={(e) => handleContentUrlChange(e.target.value)}
+                  placeholder="Paste YouTube, Twitch, Vimeo, MP4, Netflix, Prime, etc."
                   className="mt-1.5 h-11 border-white/10 bg-black/40 text-xs text-white font-mono"
                 />
+                {resolvedPreview && resolvedPreview.platform !== "generic" && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-[#d6ff3f]/20 bg-[#d6ff3f]/5 px-3 py-1.5 text-[11px] text-neutral-300">
+                    <Sparkles size={12} className="text-[#d6ff3f] shrink-0" />
+                    <span>Detected:</span>
+                    <strong className="text-white">{resolvedPreview.platformName}</strong>
+                    <span className="text-neutral-500">•</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.2 text-[9px] font-bold text-[#d6ff3f]">
+                      {resolvedPreview.capabilities.syncCapability === "automatic" ? "Auto-Sync" : "Companion Sync"}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[.02] p-3">

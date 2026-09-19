@@ -36,6 +36,15 @@ export interface PlaybackState {
   serverTime: number;
 }
 
+export interface QueueItem {
+  id: string;
+  url: string;
+  title: string;
+  platform: string;
+  platformName: string;
+  addedBy: string;
+}
+
 export interface UseRoomSocketProps {
   roomCode: string;
   user: SocketUser;
@@ -44,6 +53,8 @@ export interface UseRoomSocketProps {
   onPlaybackSync?: (state: { eventType: string; position: number; isPlaying: boolean; initiatedBy: string }) => void;
   onVoiceSignal?: (senderPeerId: string, senderName: string, signal: any) => void;
   onCountdownTick?: (count: number, message: string) => void;
+  onContentChanged?: (data: { contentUrl: string; platform: string; title: string }) => void;
+  onKicked?: (message: string) => void;
 }
 
 export function useRoomSocket({
@@ -54,6 +65,8 @@ export function useRoomSocket({
   onPlaybackSync,
   onVoiceSignal,
   onCountdownTick,
+  onContentChanged,
+  onKicked,
 }: UseRoomSocketProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -71,6 +84,14 @@ export function useRoomSocket({
   });
   const [localDrift, setLocalDrift] = useState<number>(0);
   const [driftStatus, setDriftStatus] = useState<DriftStatus>("synced");
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [roomContent, setRoomContent] = useState<{ contentUrl: string; platform: string; title: string } | null>(null);
+  const [roomSettings, setRoomSettings] = useState<any>({
+    hostOnlyControls: true,
+    lockSeeking: false,
+    allowReactions: true,
+    allowVoice: true,
+  });
 
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isUnmountingRef = useRef(false);
@@ -132,13 +153,55 @@ export function useRoomSocket({
           setRole(data.role);
           setMembers(data.members || []);
           if (data.messages) setMessages(data.messages);
+          if (data.queue) setQueue(data.queue);
           if (data.room) {
             setRoomPlayback({
               isPlaying: data.room.isPlaying,
               currentPosition: data.room.currentPosition,
               serverTime: data.room.serverTime || Date.now(),
             });
+            if (data.room.contentUrl) {
+              setRoomContent({
+                contentUrl: data.room.contentUrl,
+                platform: data.room.platform,
+                title: data.room.title,
+              });
+            }
+            if (data.room.settings) {
+              setRoomSettings(data.room.settings);
+            }
           }
+          return;
+        }
+
+        if (data.type === "content_changed") {
+          setRoomContent({
+            contentUrl: data.contentUrl,
+            platform: data.platform,
+            title: data.title,
+          });
+          setRoomPlayback({
+            isPlaying: false,
+            currentPosition: 0,
+            serverTime: Date.now(),
+          });
+          onContentChanged?.(data);
+          return;
+        }
+
+        if (data.type === "queue_update") {
+          setQueue(data.queue || []);
+          return;
+        }
+
+        if (data.type === "settings_update") {
+          setRoomSettings((prev: any) => ({ ...prev, ...data.settings }));
+          return;
+        }
+
+        if (data.type === "kicked") {
+          toast.error(data.message || "You were removed from the room");
+          onKicked?.(data.message || "You were removed by host");
           return;
         }
 
@@ -318,6 +381,63 @@ export function useRoomSocket({
     }
   }, []);
 
+  const changeContent = useCallback((contentUrl: string, platform?: string, title?: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "change_content",
+          contentUrl,
+          platform,
+          title,
+        })
+      );
+    }
+  }, []);
+
+  const updateQueue = useCallback((newQueue: QueueItem[]) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "queue_update",
+          queue: newQueue,
+        })
+      );
+    }
+  }, []);
+
+  const transferHost = useCallback((targetPeerId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "transfer_host",
+          targetPeerId,
+        })
+      );
+    }
+  }, []);
+
+  const kickPeer = useCallback((targetPeerId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "kick_peer",
+          targetPeerId,
+        })
+      );
+    }
+  }, []);
+
+  const updateSettings = useCallback((newSettings: any) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "update_room_settings",
+          settings: newSettings,
+        })
+      );
+    }
+  }, []);
+
   return {
     connected,
     peerId,
@@ -330,6 +450,9 @@ export function useRoomSocket({
     latencyMs,
     localDrift,
     driftStatus,
+    queue,
+    roomContent,
+    roomSettings,
     calculateDrift,
     broadcastPlayback,
     sendChatMessage,
@@ -338,5 +461,10 @@ export function useRoomSocket({
     triggerCountdown,
     updateVoiceState,
     sendVoiceSignal,
+    changeContent,
+    updateQueue,
+    transferHost,
+    kickPeer,
+    updateSettings,
   };
 }

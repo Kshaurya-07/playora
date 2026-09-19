@@ -5,17 +5,23 @@ import { RoomMemberPresence } from "@/hooks/useRoomSocket";
 interface ParticipantsPanelProps {
   members: RoomMemberPresence[];
   currentUserId: number;
-  peerVolumes: Record<string, number>;
-  onVolumeChange: (peerId: string, volume: number) => void;
+  peerVolumes?: Record<string, number>;
+  onVolumeChange?: (peerId: string, volume: number) => void;
   syncHealthPercent?: number;
+  isHost?: boolean;
+  onKickMember?: (peerId: string) => void;
+  onTransferHost?: (peerId: string) => void;
 }
 
 export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
   members,
   currentUserId,
-  peerVolumes,
+  peerVolumes = {},
   onVolumeChange,
   syncHealthPercent = 98,
+  isHost,
+  onKickMember,
+  onTransferHost,
 }) => {
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[#11141c] p-4">
@@ -87,22 +93,49 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                 </div>
               </div>
 
-              {/* Volume Slider for Other Peers */}
+              {/* Volume Slider & Host Actions for Other Peers */}
               {!isYou && (
-                <div className="mt-2.5 flex items-center gap-2 border-t border-white/5 pt-2">
-                  <Volume2 size={12} className="text-neutral-500" />
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={currentVol}
-                    onChange={(e) => onVolumeChange(member.peerId, parseFloat(e.target.value))}
-                    className="h-1 flex-1 accent-[#d6ff3f] cursor-pointer"
-                  />
-                  <span className="font-mono text-[9px] text-neutral-500 w-6 text-right">
-                    {Math.round(currentVol * 100)}%
-                  </span>
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-white/5 pt-2">
+                  {onVolumeChange && (
+                    <div className="flex items-center gap-2 flex-1">
+                      <Volume2 size={12} className="text-neutral-500" />
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={currentVol}
+                        onChange={(e) => onVolumeChange(member.peerId, parseFloat(e.target.value))}
+                        className="h-1 flex-1 accent-[#d6ff3f] cursor-pointer"
+                      />
+                      <span className="font-mono text-[9px] text-neutral-500 w-6 text-right">
+                        {Math.round(currentVol * 100)}%
+                      </span>
+                    </div>
+                  )}
+
+                  {isHost && (
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      {onTransferHost && (
+                        <button
+                          onClick={() => onTransferHost(member.peerId)}
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold text-neutral-400 hover:text-amber-300 hover:bg-amber-400/10 transition"
+                          title="Transfer Host"
+                        >
+                          Host
+                        </button>
+                      )}
+                      {onKickMember && (
+                        <button
+                          onClick={() => onKickMember(member.peerId)}
+                          className="rounded px-1.5 py-0.5 text-[9px] font-bold text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition"
+                          title="Remove from Party"
+                        >
+                          Kick
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

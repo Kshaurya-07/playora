@@ -3,25 +3,28 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
-  PLATFORM_REGISTRY,
-  PlatformId,
-  getYouTubeVideoId,
-  isYouTubeLiveUrl,
-  getTwitchTarget,
-  getKickChannel,
+  resolveStreamingContent,
   formatTimecode,
-} from "@shared/watch-party";
-import { useRoomSocket } from "@/hooks/useRoomSocket";
+  ResolvedContent,
+  DriftStatus,
+} from "@shared/universal-streaming-engine";
+import { useRoomSocket, QueueItem } from "@/hooks/useRoomSocket";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
 import { YouTubeAdapter } from "@/components/adapters/YouTubeAdapter";
 import { TwitchAdapter } from "@/components/adapters/TwitchAdapter";
+import { VimeoAdapter } from "@/components/adapters/VimeoAdapter";
+import { GenericHTML5Adapter } from "@/components/adapters/GenericHTML5Adapter";
 import { KickAdapter } from "@/components/adapters/KickAdapter";
 import { AssistedSyncAdapter } from "@/components/adapters/AssistedSyncAdapter";
+import { AdapterDiagnostics } from "@/components/adapters/types";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ParticipantsPanel } from "@/components/ParticipantsPanel";
 import { ReactionsOverlay } from "@/components/ReactionsOverlay";
 import { SyncStatusIndicator } from "@/components/SyncStatusIndicator";
 import { CountdownModal } from "@/components/CountdownModal";
+import { DiagnosticsModal } from "@/components/DiagnosticsModal";
+import { HostControlCenter } from "@/components/HostControlCenter";
+import { PartyQueueModal } from "@/components/PartyQueueModal";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -37,10 +40,11 @@ import {
   X,
   Play,
   Pause,
-  Volume2,
-  Check,
   AlertCircle,
-  ExternalLink,
+  Activity,
+  ListVideo,
+  Crown,
+  Sparkles,
 } from "lucide-react";
 
 interface WatchRoomPageProps {
@@ -61,18 +65,27 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     }
   );
 
-  // Local state
+  // Modals & Panels state
   const [activeTab, setActiveTab] = useState<"chat" | "people">("chat");
   const [mobilePanel, setMobilePanel] = useState<"none" | "chat" | "people">("none");
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [showQueueModal, setShowQueueModal] = useState(false);
+  const [showHostControls, setShowHostControls] = useState(false);
+
   const [countdownState, setCountdownState] = useState<{ count: number; message: string }>({
     count: 0,
     message: "",
   });
 
-  // Local player state
+  // Local player state & diagnostics
   const [localPlayerPos, setLocalPlayerPos] = useState(0);
   const [targetSeekPos, setTargetSeekPos] = useState(0);
+  const [diagnostics, setDiagnostics] = useState<AdapterDiagnostics | null>(null);
+
+  const handleDiagnosticsUpdate = useCallback((partial: Partial<AdapterDiagnostics>) => {
+    setDiagnostics((prev) => (prev ? { ...prev, ...partial } : (partial as AdapterDiagnostics)));
+  }, []);
 
   // Current user info for socket
   const socketUser = useMemo(
@@ -93,9 +106,13 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     messages,
     activeReaction,
     roomPlayback,
+    clockOffset,
     latencyMs,
     localDrift,
     driftStatus,
+    queue,
+    roomContent,
+    roomSettings,
     calculateDrift,
     broadcastPlayback,
     sendChatMessage,
@@ -104,6 +121,11 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     triggerCountdown,
     updateVoiceState,
     sendVoiceSignal,
+    changeContent,
+    updateQueue,
+    transferHost,
+    kickPeer,
+    updateSettings,
   } = useRoomSocket({
     roomCode: cleanCode,
     user: socketUser,
@@ -118,12 +140,18 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     onCountdownTick: (count, message) => {
       setCountdownState({ count, message });
     },
+    onContentChanged: (newContent) => {
+      setTargetSeekPos(0);
+      setLocalPlayerPos(0);
+      toast.info(`Stream switched to ${newContent.title}`);
+    },
+    onKicked: (msg) => {
+      toast.error(msg);
+      setLocation("/dashboard");
+    },
   });
 
-  const isHost = role === "host" || room?.hostId === socketUser.id;
-  const canControl = isHost || !room?.settings?.hostOnlyControls;
-
-  // WebRTC Voice Chat Hook
+  // Voice Chat Hook
   const voiceChat = useVoiceChat({
     myPeerId: peerId,
     activeMembers: members,
@@ -132,6 +160,18 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       updateVoiceState(voiceChat.muted, isSpeaking);
     },
   });
+
+  const isHost = role === "host" || room?.hostId === socketUser.id;
+  const canControl = isHost || !roomSettings?.hostOnlyControls;
+
+  // Active content: prioritize real-time broadcasted roomContent over initial DB fetch
+  const activeUrl = roomContent?.contentUrl || room?.contentUrl || "https://www.youtube.com/watch?v=M7lc1UVf-VE";
+  const activeTitle = roomContent?.title || room?.title || `Watch Party ${cleanCode}`;
+
+  // Resolve content dynamically via universal engine
+  const resolvedContent: ResolvedContent = useMemo(() => {
+    return resolveStreamingContent(activeUrl);
+  }, [activeUrl]);
 
   // Update local position and calculate drift against authoritative room clock
   const handlePositionUpdate = useCallback(
@@ -162,6 +202,42 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       description: `Aligned to ${formatTimecode(projectedPos)}`,
     });
   }, [calculateDrift, localPlayerPos]);
+
+  // Auto-advance playlist queue when a video finishes
+  const handleVideoEnded = useCallback(() => {
+    if (isHost && queue.length > 0) {
+      const nextItem = queue[0];
+      const remainingQueue = queue.slice(1);
+      updateQueue(remainingQueue);
+      changeContent(nextItem.url, nextItem.platform, nextItem.title);
+      toast.success(`Playing next in queue: ${nextItem.title}`);
+    }
+  }, [isHost, queue, updateQueue, changeContent]);
+
+  // Queue actions
+  const handleAddToQueue = (item: Omit<QueueItem, "id">) => {
+    const newItem: QueueItem = {
+      ...item,
+      id: "q_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+      addedBy: socketUser.name,
+    };
+    updateQueue([...queue, newItem]);
+  };
+
+  const handlePlayQueueItem = (item: QueueItem) => {
+    if (!isHost) return;
+    const remainingQueue = queue.filter((q) => q.id !== item.id);
+    updateQueue(remainingQueue);
+    changeContent(item.url, item.platform, item.title);
+  };
+
+  const handleRemoveQueueItem = (id: string) => {
+    updateQueue(queue.filter((q) => q.id !== id));
+  };
+
+  const handleClearQueue = () => {
+    updateQueue([]);
+  };
 
   // Copy room link
   const handleCopyLink = () => {
@@ -202,12 +278,98 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     );
   }
 
-  // Identify platform and URL IDs
-  const platformId = (room.platform.toLowerCase() as PlatformId) || "generic";
-  const platformMeta = PLATFORM_REGISTRY[platformId] || PLATFORM_REGISTRY.generic;
-  const youtubeVideoId = platformId === "youtube" ? getYouTubeVideoId(room.contentUrl) : null;
-  const twitchTarget = platformId === "twitch" ? getTwitchTarget(room.contentUrl) : null;
-  const kickChannel = platformId === "kick" ? getKickChannel(room.contentUrl) : null;
+  // Render the appropriate player adapter
+  const renderAdapter = () => {
+    switch (resolvedContent.platform) {
+      case "youtube":
+        return (
+          <YouTubeAdapter
+            content={resolvedContent}
+            isHost={isHost}
+            canControl={canControl}
+            isPlaying={roomPlayback.isPlaying}
+            targetPosition={targetSeekPos || roomPlayback.currentPosition}
+            onPositionUpdate={handlePositionUpdate}
+            onLocalPlaybackChange={handleLocalPlaybackChange}
+            onDiagnosticsUpdate={handleDiagnosticsUpdate}
+            onEnded={handleVideoEnded}
+          />
+        );
+
+      case "twitch":
+        return (
+          <TwitchAdapter
+            content={resolvedContent}
+            isHost={isHost}
+            canControl={canControl}
+            isPlaying={roomPlayback.isPlaying}
+            targetPosition={targetSeekPos || roomPlayback.currentPosition}
+            onPositionUpdate={handlePositionUpdate}
+            onLocalPlaybackChange={handleLocalPlaybackChange}
+            onDiagnosticsUpdate={handleDiagnosticsUpdate}
+            onEnded={handleVideoEnded}
+          />
+        );
+
+      case "vimeo":
+        return (
+          <VimeoAdapter
+            content={resolvedContent}
+            isHost={isHost}
+            canControl={canControl}
+            isPlaying={roomPlayback.isPlaying}
+            targetPosition={targetSeekPos || roomPlayback.currentPosition}
+            onPositionUpdate={handlePositionUpdate}
+            onLocalPlaybackChange={handleLocalPlaybackChange}
+            onDiagnosticsUpdate={handleDiagnosticsUpdate}
+            onEnded={handleVideoEnded}
+          />
+        );
+
+      case "html5":
+        return (
+          <GenericHTML5Adapter
+            content={resolvedContent}
+            isHost={isHost}
+            canControl={canControl}
+            isPlaying={roomPlayback.isPlaying}
+            targetPosition={targetSeekPos || roomPlayback.currentPosition}
+            onPositionUpdate={handlePositionUpdate}
+            onLocalPlaybackChange={handleLocalPlaybackChange}
+            onDiagnosticsUpdate={handleDiagnosticsUpdate}
+            onEnded={handleVideoEnded}
+          />
+        );
+
+      case "kick":
+        return (
+          <KickAdapter
+            content={resolvedContent}
+            isHost={isHost}
+            isPlaying={roomPlayback.isPlaying}
+            onTriggerCountdown={() => triggerCountdown(3)}
+            onDiagnosticsUpdate={handleDiagnosticsUpdate}
+          />
+        );
+
+      default:
+        // OTT Platforms (Netflix, Prime, Disney+, Hotstar, Crunchyroll, etc.) or unknown
+        return (
+          <AssistedSyncAdapter
+            content={resolvedContent}
+            roomTitle={activeTitle}
+            isHost={isHost}
+            isPlaying={roomPlayback.isPlaying}
+            currentPosition={localPlayerPos || roomPlayback.currentPosition}
+            onTogglePlayback={() =>
+              handleLocalPlaybackChange(!roomPlayback.isPlaying, localPlayerPos)
+            }
+            onTriggerCountdown={() => triggerCountdown(3)}
+            onDiagnosticsUpdate={handleDiagnosticsUpdate}
+          />
+        );
+    }
+  };
 
   return (
     <div className="playora-shell flex min-h-screen flex-col overflow-hidden">
@@ -219,9 +381,69 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       {/* Floating Reactions Canvas/Particle Overlay */}
       <ReactionsOverlay activeReaction={activeReaction} />
 
+      {/* Telemetry Diagnostics Modal */}
+      <DiagnosticsModal
+        isOpen={showDiagnosticsModal}
+        onClose={() => setShowDiagnosticsModal(false)}
+        diagnostics={diagnostics}
+        content={resolvedContent}
+        latencyMs={latencyMs}
+        clockOffset={clockOffset}
+        localDrift={localDrift}
+        driftStatus={driftStatus}
+        connected={connected}
+        voiceConnected={!voiceChat.muted}
+        voicePeerCount={voiceChat.connectedPeersCount}
+        onForceResync={handleSyncNow}
+      />
+
+      {/* Playlist Queue Modal */}
+      <PartyQueueModal
+        isOpen={showQueueModal}
+        onClose={() => setShowQueueModal(false)}
+        queue={queue}
+        currentUrl={activeUrl}
+        isHost={isHost}
+        onAddToQueue={handleAddToQueue}
+        onPlayItem={handlePlayQueueItem}
+        onRemoveItem={handleRemoveQueueItem}
+        onClearQueue={handleClearQueue}
+      />
+
+      {/* Host Control Center Drawer/Modal */}
+      {isHost && (
+        <HostControlCenter
+          isOpen={showHostControls}
+          onClose={() => setShowHostControls(false)}
+          isPlaying={roomPlayback.isPlaying}
+          currentPosition={localPlayerPos || roomPlayback.currentPosition}
+          members={members}
+          currentPeerId={peerId}
+          settings={roomSettings}
+          onTogglePlay={(playState) =>
+            handleLocalPlaybackChange(playState, localPlayerPos || roomPlayback.currentPosition)
+          }
+          onSeek={(newPos) => {
+            setTargetSeekPos(newPos);
+            broadcastPlayback("seek", newPos);
+          }}
+          onForceSyncEveryone={() =>
+            broadcastPlayback(
+              roomPlayback.isPlaying ? "play" : "pause",
+              localPlayerPos || roomPlayback.currentPosition
+            )
+          }
+          onTriggerCountdown={(sec) => triggerCountdown(sec || 3)}
+          onChangeContent={(newUrl, platform, title) => changeContent(newUrl, platform, title)}
+          onUpdateSettings={updateSettings}
+          onTransferHost={transferHost}
+          onKickMember={kickPeer}
+        />
+      )}
+
       {/* Top Navigation Bar */}
       <header className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-white/[.08] bg-[#0c0e15]/90 px-4 backdrop-blur-xl lg:px-6">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setLocation("/dashboard")}
             className="btn-press flex items-center gap-1.5 text-xs font-bold text-neutral-400 hover:text-white"
@@ -237,32 +459,100 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
               <Waves size={16} />
             </div>
             <div>
-              <h1 className="max-w-[200px] truncate text-xs font-black text-white sm:max-w-xs">
-                {room.title}
+              <h1 className="max-w-[170px] truncate text-xs font-black text-white sm:max-w-xs md:max-w-md">
+                {activeTitle}
               </h1>
               <div className="flex items-center gap-2 text-[9px] text-neutral-400">
                 <span className="font-mono font-bold text-[#d6ff3f]">{cleanCode}</span>
                 <span>•</span>
-                <span>{platformMeta.name}</span>
+                <span>{resolvedContent.platformName}</span>
+                <span className="hidden md:inline">•</span>
+                <span className="hidden md:inline capitalize">{resolvedContent.contentType}</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Header Right Status & Controls */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
+          {/* Real-time Sync Status Indicator */}
           <SyncStatusIndicator
             status={driftStatus}
             driftSeconds={localDrift}
             latencyMs={latencyMs}
             onSyncNow={handleSyncNow}
-            showSyncButton={platformMeta.syncCapability === "automatic"}
+            showSyncButton={resolvedContent.capabilities.syncCapability === "automatic"}
           />
 
+          {/* Diagnostics Button */}
+          <Button
+            onClick={() => setShowDiagnosticsModal(true)}
+            variant="outline"
+            size="sm"
+            className="h-8 w-8 p-0 rounded-lg border-white/10 bg-white/5 text-neutral-300 hover:text-white hover:bg-white/10"
+            title="Diagnostics & Stream Info"
+          >
+            <Activity size={14} />
+          </Button>
+
+          {/* Party Playlist Queue Button */}
+          <Button
+            onClick={() => setShowQueueModal(true)}
+            variant="outline"
+            size="sm"
+            className="relative h-8 rounded-lg border-white/10 bg-white/5 px-2.5 text-xs font-bold text-white hover:bg-white/10"
+          >
+            <ListVideo size={14} className="mr-1.5" />
+            <span className="hidden sm:inline">Queue</span>
+            {queue.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-[#d6ff3f] px-1.5 py-0.2 text-[9px] font-mono font-black text-black">
+                {queue.length}
+              </span>
+            )}
+          </Button>
+
+          {/* Host Control Center Button */}
+          {isHost && (
+            <Button
+              onClick={() => setShowHostControls(true)}
+              size="sm"
+              className="h-8 rounded-lg bg-amber-400/20 border border-amber-400/40 px-2.5 text-xs font-bold text-amber-300 hover:bg-amber-400/30"
+            >
+              <Crown size={13} className="mr-1.5 text-amber-400" />
+              <span className="hidden sm:inline">Host Controls</span>
+            </Button>
+          )}
+
+          {/* Voice Chat Mic Toggle */}
+          <Button
+            onClick={voiceChat.toggleMute}
+            variant="outline"
+            size="sm"
+            className={`h-8 rounded-lg border px-2.5 text-xs font-bold transition ${
+              voiceChat.muted
+                ? "border-white/10 bg-white/5 text-neutral-400 hover:bg-white/10"
+                : "border-emerald-500/40 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 animate-pulse"
+            }`}
+          >
+            {voiceChat.muted ? (
+              <>
+                <MicOff size={13} className="mr-1 sm:mr-1.5 text-red-400" />
+                <span className="hidden sm:inline">Muted</span>
+              </>
+            ) : (
+              <>
+                <Mic size={13} className="mr-1 sm:mr-1.5 text-emerald-400" />
+                <span className="hidden sm:inline">Voice Live</span>
+              </>
+            )}
+          </Button>
+
+          {/* Invite Button */}
           <Button
             onClick={() => setShowInviteModal(true)}
             variant="outline"
-            className="h-8 rounded-lg border-white/10 bg-white/5 px-2.5 text-xs font-bold text-white hover:bg-white/10"
+            size="sm"
+            className="h-8 rounded-lg border-[#d6ff3f]/30 bg-[#d6ff3f]/10 px-2.5 text-xs font-bold text-[#d6ff3f] hover:bg-[#d6ff3f]/20"
           >
             <Share2 size={13} className="mr-1.5" />
             <span className="hidden sm:inline">Invite</span>
@@ -271,55 +561,14 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       </header>
 
       {/* Main Room Split View: Video Surface on Left, Social Panel on Right */}
-      <main className="relative z-10 mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[1fr_360px] lg:p-4">
+      <main className="relative z-10 mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[1fr_360px] lg:p-4 min-h-0">
         {/* Left: Video Player Surface */}
         <section className="flex flex-col min-w-0">
           <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-            {platformId === "youtube" && youtubeVideoId ? (
-              <YouTubeAdapter
-                videoId={youtubeVideoId}
-                isLive={isYouTubeLiveUrl(room.contentUrl)}
-                isHost={isHost}
-                canControl={canControl}
-                isPlaying={roomPlayback.isPlaying}
-                targetPosition={targetSeekPos || roomPlayback.currentPosition}
-                onPositionUpdate={handlePositionUpdate}
-                onLocalPlaybackChange={handleLocalPlaybackChange}
-              />
-            ) : platformId === "twitch" && twitchTarget ? (
-              <TwitchAdapter
-                target={twitchTarget}
-                isHost={isHost}
-                canControl={canControl}
-                isPlaying={roomPlayback.isPlaying}
-                targetPosition={targetSeekPos || roomPlayback.currentPosition}
-                onPositionUpdate={handlePositionUpdate}
-                onLocalPlaybackChange={handleLocalPlaybackChange}
-              />
-            ) : platformId === "kick" && kickChannel ? (
-              <KickAdapter
-                channel={kickChannel}
-                isHost={isHost}
-                isPlaying={roomPlayback.isPlaying}
-                onTriggerCountdown={() => triggerCountdown(3)}
-              />
-            ) : (
-              <AssistedSyncAdapter
-                platform={platformMeta}
-                contentUrl={room.contentUrl}
-                roomTitle={room.title}
-                isHost={isHost}
-                isPlaying={roomPlayback.isPlaying}
-                currentPosition={localPlayerPos || roomPlayback.currentPosition}
-                onTogglePlayback={() =>
-                  handleLocalPlaybackChange(!roomPlayback.isPlaying, localPlayerPos)
-                }
-                onTriggerCountdown={() => triggerCountdown(3)}
-              />
-            )}
+            {renderAdapter()}
           </div>
 
-          {/* Quick Playback Bar & Floating Reactions for Mobile */}
+          {/* Quick Playback Bar & Floating Reactions for Mobile / Desktop */}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[.08] bg-[#11141c] p-2.5">
             <div className="flex items-center gap-2">
               {canControl && (
@@ -362,7 +611,7 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
                 <button
                   key={emoji}
                   onClick={() => sendReaction(emoji)}
-                  className="btn-press rounded-md px-1.5 py-1 text-sm hover:bg-white/10"
+                  className="btn-press rounded-md px-2 py-1 text-sm hover:bg-white/10"
                 >
                   {emoji}
                 </button>
@@ -448,105 +697,42 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
               <ParticipantsPanel
                 members={members}
                 currentUserId={socketUser.id}
-                peerVolumes={voiceChat.peerVolumes}
-                onVolumeChange={voiceChat.setPeerVolume}
+                isHost={isHost}
+                onKickMember={isHost ? kickPeer : undefined}
+                onTransferHost={isHost ? transferHost : undefined}
               />
             )}
-          </div>
-
-          {/* Voice Chat Footer Controls */}
-          <div className="flex shrink-0 items-center justify-between border-t border-white/[.08] bg-[#0c0e14] px-4 py-3">
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => {
-                  if (voiceChat.joined) {
-                    voiceChat.leaveVoice();
-                  } else {
-                    voiceChat.joinVoice();
-                  }
-                }}
-                className={`h-8 rounded-lg px-3 text-xs font-bold ${
-                  voiceChat.joined
-                    ? "bg-[#d6ff3f] text-black hover:bg-[#e1ff70]"
-                    : "border border-white/10 bg-white/5 text-white hover:bg-white/10"
-                }`}
-              >
-                <Mic size={13} className="mr-1.5" />
-                {voiceChat.joined ? "Voice Connected" : "Join Voice"}
-              </Button>
-
-              {voiceChat.joined && (
-                <button
-                  onClick={voiceChat.toggleMute}
-                  className={`flex h-8 w-8 items-center justify-center rounded-lg border transition ${
-                    voiceChat.muted
-                      ? "border-red-500/30 bg-red-500/10 text-red-400"
-                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
-                  }`}
-                  title={voiceChat.muted ? "Unmute microphone" : "Mute microphone"}
-                >
-                  {voiceChat.muted ? <MicOff size={14} /> : <Mic size={14} />}
-                </button>
-              )}
-            </div>
-
-            <button
-              onClick={() => setLocation("/dashboard")}
-              className="text-[10px] font-semibold text-neutral-400 hover:text-red-400 transition"
-            >
-              Leave Room
-            </button>
           </div>
         </aside>
       </main>
 
       {/* Invite Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
-          <div className="glass w-full max-w-md rounded-3xl border border-white/[.12] p-6 shadow-2xl">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#d6ff3f]">
-                  Party Invite
-                </span>
-                <h3 className="mt-1 text-xl font-extrabold text-white">Bring Your Friends In</h3>
-                <p className="mt-1 text-xs text-neutral-400">
-                  Anyone with this link or code can join the synchronized room.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowInviteModal(false)}
-                className="text-neutral-400 hover:text-white"
-              >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#11141c] p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-white">Invite Friends</h3>
+              <button onClick={() => setShowInviteModal(false)} className="text-neutral-400 hover:text-white">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="mt-6 flex items-center gap-2 rounded-xl border border-white/10 bg-black/40 p-2 pl-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-300">
-                {window.location.origin}/party/{cleanCode}
-              </span>
+            <p className="mt-2 text-xs text-neutral-400">
+              Anyone with this party link or code can jump straight into the room and watch with you.
+            </p>
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4 text-center">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Party Code</p>
+              <p className="mt-1 font-mono text-2xl font-black text-[#d6ff3f]">{cleanCode}</p>
+            </div>
+
+            <div className="mt-4 flex gap-2">
               <Button
                 onClick={handleCopyLink}
-                className="h-8 rounded-lg bg-[#d6ff3f] px-3 text-xs font-bold text-black hover:bg-[#e1ff70]"
+                className="h-10 flex-1 rounded-xl bg-[#d6ff3f] text-xs font-bold text-black hover:bg-[#e1ff70]"
               >
-                <Copy size={13} className="mr-1.5" /> Copy
-              </Button>
-            </div>
-
-            <div className="mt-4 flex items-center justify-between rounded-xl bg-white/[.02] p-3 text-xs text-neutral-400">
-              <span>Room Code:</span>
-              <span className="font-mono text-sm font-extrabold tracking-widest text-white">
-                {cleanCode}
-              </span>
-            </div>
-
-            <div className="mt-5 flex justify-end">
-              <Button
-                onClick={() => setShowInviteModal(false)}
-                className="h-9 rounded-xl border-white/10 bg-white/5 px-4 text-xs font-semibold text-white hover:bg-white/10"
-              >
-                Done
+                <Copy size={14} className="mr-1.5" />
+                Copy Party Link
               </Button>
             </div>
           </div>

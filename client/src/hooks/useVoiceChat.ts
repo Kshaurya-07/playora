@@ -283,6 +283,7 @@ export function useVoiceChat({
     muted,
     isSpeaking,
     peerVolumes,
+    connectedPeersCount: peersRef.current.size,
     joinVoice,
     leaveVoice,
     toggleMute,

@@ -1,22 +1,40 @@
-import React from "react";
-import { ExternalLink, Radio, ShieldCheck, Timer, Zap } from "lucide-react";
+import React, { useEffect } from "react";
+import { ExternalLink, Radio, Timer, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ResolvedContent } from "@shared/universal-streaming-engine";
+import { AdapterDiagnostics } from "./types";
 
 interface KickAdapterProps {
-  channel: string;
+  content: ResolvedContent;
   isHost: boolean;
   isPlaying: boolean;
   onTriggerCountdown?: () => void;
+  onDiagnosticsUpdate?: (diag: Partial<AdapterDiagnostics>) => void;
 }
 
 export const KickAdapter: React.FC<KickAdapterProps> = ({
-  channel,
+  content,
   isHost,
   isPlaying,
   onTriggerCountdown,
+  onDiagnosticsUpdate,
 }) => {
+  const channel = content.contentId;
   const kickEmbedUrl = `https://player.kick.com/${channel}?autoplay=true&muted=false`;
-  const streamUrl = `https://kick.com/${channel}`;
+  const streamUrl = content.normalizedUrl || `https://kick.com/${channel}`;
+
+  useEffect(() => {
+    onDiagnosticsUpdate?.({
+      platform: "kick",
+      normalizedUrl: streamUrl,
+      contentId: channel,
+      contentType: "live",
+      adapterName: "KickAdapter",
+      embedAllowed: true,
+      playerState: "ready",
+      apiLoaded: true,
+    });
+  }, [channel, streamUrl, onDiagnosticsUpdate]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl bg-[#0b0f0b]">
@@ -52,7 +70,7 @@ export const KickAdapter: React.FC<KickAdapterProps> = ({
           <div>
             <p className="text-[11px] font-bold text-white">Live Stream Synchronization</p>
             <p className="text-[10px] text-neutral-400">
-              Kick embeds do not permit external seek control. Stay synced to the live edge together.
+              Kick embeds do not permit programmatic seek. Coordinate stream timing with your party.
             </p>
           </div>
         </div>

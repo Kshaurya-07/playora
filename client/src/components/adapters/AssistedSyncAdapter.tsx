@@ -1,6 +1,5 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
-  ExternalLink,
   Film,
   Play,
   Pause,
@@ -8,35 +7,62 @@ import {
   CheckCircle2,
   Info,
   SquareArrowOutUpRight,
-  ShieldAlert,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatTimecode, PlatformInfo } from "@shared/watch-party";
+import { formatTimecode, PlatformMeta, ResolvedContent, PLATFORM_REGISTRY } from "@shared/universal-streaming-engine";
+import { AdapterDiagnostics } from "./types";
+import { toast } from "sonner";
 
 interface AssistedSyncAdapterProps {
-  platform: PlatformInfo;
-  contentUrl: string;
+  content: ResolvedContent;
+  platformMeta?: PlatformMeta;
   roomTitle: string;
   isHost: boolean;
   isPlaying: boolean;
   currentPosition: number;
   onTogglePlayback: () => void;
   onTriggerCountdown: () => void;
-  onSeekTo?: (seconds: number) => void;
+  onDiagnosticsUpdate?: (diag: Partial<AdapterDiagnostics>) => void;
 }
 
 export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
-  platform,
-  contentUrl,
+  content,
+  platformMeta,
   roomTitle,
   isHost,
   isPlaying,
   currentPosition,
   onTogglePlayback,
   onTriggerCountdown,
-  onSeekTo,
+  onDiagnosticsUpdate,
 }) => {
+  const meta = platformMeta || PLATFORM_REGISTRY[content.platform] || PLATFORM_REGISTRY.generic;
   const formattedTime = formatTimecode(currentPosition);
+  const [isUserReady, setIsUserReady] = useState(false);
+
+  useEffect(() => {
+    onDiagnosticsUpdate?.({
+      platform: content.platform,
+      normalizedUrl: content.normalizedUrl,
+      contentId: content.contentId,
+      contentType: "ott",
+      adapterName: "AssistedSyncAdapter",
+      embedAllowed: false,
+      playerState: isPlaying ? "playing" : "paused",
+      apiLoaded: true,
+    });
+  }, [content, isPlaying, onDiagnosticsUpdate]);
+
+  const toggleReady = () => {
+    const next = !isUserReady;
+    setIsUserReady(next);
+    if (next) {
+      toast.success("Marked as Ready!", {
+        description: `Aligned to room timecode ${formattedTime}. Ready for countdown.`,
+      });
+    }
+  };
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-white/[.1] bg-gradient-to-b from-[#131620] to-[#0a0c12] p-6 shadow-2xl">
@@ -45,7 +71,7 @@ export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
         <div className="flex items-center gap-3">
           <div
             className="flex h-10 w-10 items-center justify-center rounded-xl font-bold shadow-lg"
-            style={{ backgroundColor: platform.brandColor, color: "#fff" }}
+            style={{ backgroundColor: meta.brandColor, color: "#fff" }}
           >
             <Film size={20} />
           </div>
@@ -55,12 +81,12 @@ export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
               <span
                 className="rounded-full px-2 py-0.5 text-[9px] font-bold"
                 style={{
-                  backgroundColor: `${platform.brandColor}22`,
-                  color: platform.brandColor,
-                  border: `1px solid ${platform.brandColor}44`,
+                  backgroundColor: `${meta.brandColor}22`,
+                  color: meta.brandColor,
+                  border: `1px solid ${meta.brandColor}44`,
                 }}
               >
-                {platform.name}
+                {meta.name}
               </span>
             </div>
             <p className="text-xs text-neutral-400">
@@ -71,16 +97,16 @@ export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
 
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => window.open(contentUrl, "_blank")}
+            onClick={() => window.open(content.normalizedUrl, "_blank")}
             className="h-9 rounded-xl bg-white/[.08] px-4 text-xs font-bold text-white hover:bg-white/[.15]"
           >
-            <SquareArrowOutUpRight size={14} className="mr-1.5" /> Open on {platform.name}
+            <SquareArrowOutUpRight size={14} className="mr-1.5" /> Open on {meta.name}
           </Button>
         </div>
       </div>
 
       {/* Central Synchronized Timecode & Master Timeline */}
-      <div className="my-auto flex flex-col items-center justify-center py-8 text-center">
+      <div className="my-auto flex flex-col items-center justify-center py-6 text-center">
         <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-300">
           <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
           Master Synchronized Timecode
@@ -99,7 +125,7 @@ export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
           <span>Room is currently {isPlaying ? "Playing" : "Paused"}</span>
         </div>
 
-        {/* Play / Pause & Countdown Controls */}
+        {/* Play / Pause, Ready Check, & Countdown Controls */}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <Button
             onClick={onTogglePlayback}
@@ -117,6 +143,24 @@ export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
               <>
                 <Play size={15} className="mr-2 fill-current" /> Play Room
               </>
+            )}
+          </Button>
+
+          <Button
+            onClick={toggleReady}
+            variant="outline"
+            className={`h-11 rounded-xl px-4 text-xs font-bold transition ${
+              isUserReady
+                ? "border-[#d6ff3f]/50 bg-[#d6ff3f]/15 text-[#d6ff3f]"
+                : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+            }`}
+          >
+            {isUserReady ? (
+              <>
+                <Check size={15} className="mr-1.5" /> I'm Ready!
+              </>
+            ) : (
+              "I'm Ready"
             )}
           </Button>
 
@@ -142,19 +186,19 @@ export const AssistedSyncAdapter: React.FC<AssistedSyncAdapterProps> = ({
           <div className="rounded-lg border border-white/5 bg-white/[.02] p-2.5">
             <span className="font-mono text-[10px] font-bold text-[#d6ff3f]">STEP 01</span>
             <p className="mt-1">
-              Open the title on {platform.name} using your own active subscription.
+              Open the title on {meta.name} using your own active subscription.
             </p>
           </div>
           <div className="rounded-lg border border-white/5 bg-white/[.02] p-2.5">
             <span className="font-mono text-[10px] font-bold text-[#d6ff3f]">STEP 02</span>
             <p className="mt-1">
-              Pause your player at <strong className="text-white">{formattedTime}</strong> on your device.
+              Pause your player at <strong className="text-white">{formattedTime}</strong> and click "I'm Ready".
             </p>
           </div>
           <div className="rounded-lg border border-white/5 bg-white/[.02] p-2.5">
             <span className="font-mono text-[10px] font-bold text-[#d6ff3f]">STEP 03</span>
             <p className="mt-1">
-              When the host starts the 3-2-1 countdown, press Play right at 1 to stay perfectly aligned!
+              When the host starts the 3-2-1 countdown, press Play right at 1 to stay in sync!
             </p>
           </div>
         </div>

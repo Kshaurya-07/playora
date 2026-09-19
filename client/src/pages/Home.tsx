@@ -6,6 +6,7 @@ import {
   PLATFORM_LIST,
   PlatformId,
   PLATFORM_REGISTRY,
+  resolveStreamingContent,
 } from "@shared/watch-party";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,6 +65,18 @@ export default function Home() {
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>("youtube");
   const [contentUrl, setContentUrl] = useState("https://www.youtube.com/watch?v=M7lc1UVf-VE");
   const [hostOnly, setHostOnly] = useState(true);
+
+  const handleContentUrlChange = (val: string) => {
+    setContentUrl(val);
+    if (val.trim()) {
+      const res = resolveStreamingContent(val.trim());
+      if (res.platform !== "generic") {
+        setSelectedPlatform(res.platform);
+      }
+    }
+  };
+
+  const resolvedPreview = contentUrl.trim() ? resolveStreamingContent(contentUrl.trim()) : null;
 
   const createPartyMutation = trpc.party.create.useMutation({
     onSuccess: (room) => {
@@ -181,9 +194,9 @@ export default function Home() {
             <h1 className="max-w-[650px] text-[clamp(3.4rem,6.5vw,6.4rem)] font-black leading-[.94] tracking-[-.06em] text-white">
               Watch together.
               <br />
-              <span className="text-[#8c93a5]">Even when</span>
+              <span className="text-[#8c93a5]">Feel every</span>
               <br />
-              <span className="text-[#d6ff3f]">you’re apart.</span>
+              <span className="text-[#d6ff3f]">moment.</span>
             </h1>
 
             <p className="mt-8 max-w-[480px] text-[15px] leading-7 text-[#9ba2b3]">
@@ -343,7 +356,7 @@ export default function Home() {
 
           <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {PLATFORM_LIST.map((plat) => {
-              const isAuto = plat.syncCapability === "automatic";
+              const isAuto = plat.capabilities.syncCapability === "automatic";
               return (
                 <div
                   key={plat.id}
@@ -442,12 +455,12 @@ export default function Home() {
                         <span className="text-[11px] font-bold">{plat.name}</span>
                         <span
                           className={`mt-0.5 text-[8px] font-semibold ${
-                            plat.syncCapability === "automatic"
+                            plat.capabilities.syncCapability === "automatic"
                               ? "text-[#d6ff3f]"
                               : "text-amber-400"
                           }`}
                         >
-                          {plat.syncCapability === "automatic" ? "Auto" : "Assisted"}
+                          {plat.capabilities.syncCapability === "automatic" ? "Auto" : "Assisted"}
                         </span>
                       </button>
                     );
@@ -461,10 +474,21 @@ export default function Home() {
                 </label>
                 <Input
                   value={contentUrl}
-                  onChange={(e) => setContentUrl(e.target.value)}
-                  placeholder="https://..."
+                  onChange={(e) => handleContentUrlChange(e.target.value)}
+                  placeholder="Paste YouTube, Twitch, Vimeo, MP4, or OTT URL..."
                   className="mt-1.5 h-11 border-white/10 bg-black/40 text-xs text-white font-mono"
                 />
+                {resolvedPreview && resolvedPreview.platform !== "generic" && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-[#d6ff3f]/20 bg-[#d6ff3f]/5 px-3 py-1.5 text-[11px] text-neutral-300">
+                    <Sparkles size={12} className="text-[#d6ff3f] shrink-0" />
+                    <span>Detected:</span>
+                    <strong className="text-white">{resolvedPreview.platformName}</strong>
+                    <span className="text-neutral-500">•</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.2 text-[9px] font-bold text-[#d6ff3f]">
+                      {resolvedPreview.capabilities.syncCapability === "automatic" ? "Auto-Sync" : "Companion Sync"}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[.02] p-3">
