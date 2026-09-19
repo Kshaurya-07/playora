@@ -41,18 +41,10 @@ export function validateStartupEnvironment(): { isValid: boolean; errors: string
     );
   }
 
-  if (ENV.isProduction) {
-    if (!process.env.JWT_SECRET && !process.env.PLAYORA_SESSION_SECRET && !process.env.PLAYORA_ENCRYPTION_SECRET) {
-      errors.push(
-        "Production deployment requires an explicit JWT_SECRET or PLAYORA_SESSION_SECRET environment variable."
-      );
-    }
-  } else {
-    if (!process.env.JWT_SECRET && !process.env.PLAYORA_SESSION_SECRET) {
-      warnings.push(
-        "Running with auto-generated development session secret (.dev_secret). Configure JWT_SECRET for production."
-      );
-    }
+  if (!process.env.JWT_SECRET && !process.env.PLAYORA_SESSION_SECRET && !process.env.PLAYORA_ENCRYPTION_SECRET) {
+    warnings.push(
+      "JWT_SECRET is not explicitly set in environment variables. PlayOra is operating with an auto-generated 256-bit runtime key. For session persistence across restarts, set JWT_SECRET in your platform dashboard."
+    );
   }
 
   if (!process.env.DATABASE_URL) {

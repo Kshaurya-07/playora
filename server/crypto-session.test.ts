@@ -36,6 +36,18 @@ describe("PlayOra Security & Crypto Session Engine", () => {
     expect(validation.errors).toHaveLength(0);
   });
 
+  it("gracefully runs startup environment validation in production mode without explicit JWT_SECRET", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      const validation = validateStartupEnvironment();
+      expect(validation.isValid).toBe(true);
+      expect(validation.errors).toHaveLength(0);
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   it("returns full system diagnostics reporting all engines green", async () => {
     const report = await getSystemDiagnostics();
     expect(report.environment.backendReachable).toBe(true);
