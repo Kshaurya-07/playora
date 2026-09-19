@@ -86,7 +86,19 @@ export default function Home() {
       setLocation(`/party/${room.code}`);
     },
     onError: (err) => {
-      toast.error(err.message || "Failed to create room");
+      const rawMsg = err.message || "";
+      if (
+        rawMsg.includes("Zero-length key") ||
+        rawMsg.includes("security configuration") ||
+        rawMsg.includes("JWT_SECRET")
+      ) {
+        toast.error("Unable to create party", {
+          description:
+            "The server security configuration is incomplete. Please check the PlayOra server environment configuration.",
+        });
+      } else {
+        toast.error(rawMsg || "Failed to create room");
+      }
     },
   });
 

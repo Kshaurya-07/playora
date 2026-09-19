@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import * as db from "./db";
+import { resolveStreamingContent } from "@shared/universal-streaming-engine";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
@@ -36,13 +37,21 @@ export const appRouter = router({
           lastSignedIn: new Date(),
         });
 
-        const sessionToken = await sdk.createSessionToken(openId, {
-          name: guestName,
-          expiresInMs: ONE_YEAR_MS,
-        });
+        try {
+          const sessionToken = await sdk.createSessionToken(openId, {
+            name: guestName,
+            expiresInMs: ONE_YEAR_MS,
+          });
 
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+          const cookieOptions = getSessionCookieOptions(ctx.req);
+          ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        } catch (tokenErr: any) {
+          console.error("[Auth] Failed to sign guest session token:", tokenErr);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Unable to sign in as guest: server security configuration is incomplete. Please check JWT_SECRET.",
+          });
+        }
 
         return user;
       }),
@@ -61,12 +70,16 @@ export const appRouter = router({
           avatarColor: input.avatarColor ?? ctx.user.avatarColor,
         });
 
-        const sessionToken = await sdk.createSessionToken(ctx.user.openId, {
-          name: input.name.trim(),
-          expiresInMs: ONE_YEAR_MS,
-        });
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        try {
+          const sessionToken = await sdk.createSessionToken(ctx.user.openId, {
+            name: input.name.trim(),
+            expiresInMs: ONE_YEAR_MS,
+          });
+          const cookieOptions = getSessionCookieOptions(ctx.req);
+          ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        } catch (tokenErr: any) {
+          console.error("[Auth] Failed to refresh session token:", tokenErr);
+        }
 
         return updated;
       }),
@@ -98,6 +111,11 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // Resolve & validate content URL via Universal Engine
+        const resolved = resolveStreamingContent(input.contentUrl);
+        const finalPlatform = resolved.platform !== "generic" ? resolved.platform : input.platform.toLowerCase().trim();
+        const finalUrl = resolved.normalizedUrl || input.contentUrl.trim();
+
         // Ensure user exists (create guest if unauthenticated)
         let userId = ctx.user?.id;
         if (!userId) {
@@ -112,12 +130,20 @@ export const appRouter = router({
           });
           userId = guestUser.id;
 
-          const sessionToken = await sdk.createSessionToken(openId, {
-            name: guestName,
-            expiresInMs: ONE_YEAR_MS,
-          });
-          const cookieOptions = getSessionCookieOptions(ctx.req);
-          ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+          try {
+            const sessionToken = await sdk.createSessionToken(openId, {
+              name: guestName,
+              expiresInMs: ONE_YEAR_MS,
+            });
+            const cookieOptions = getSessionCookieOptions(ctx.req);
+            ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+          } catch (tokenErr: any) {
+            console.error("[Party] Failed to sign host session token:", tokenErr);
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Unable to create party: The server security configuration is incomplete. Please check the PlayOra server environment configuration.",
+            });
+          }
         }
 
         // Generate clean alphanumeric 8-char uppercase code (excluding confusing chars)
@@ -130,8 +156,8 @@ export const appRouter = router({
         const room = await db.createRoom({
           code,
           title: input.title.trim(),
-          platform: input.platform.toLowerCase().trim(),
-          contentUrl: input.contentUrl.trim(),
+          platform: finalPlatform,
+          contentUrl: finalUrl,
           hostId: userId,
           isPlaying: false,
           currentPosition: 0,

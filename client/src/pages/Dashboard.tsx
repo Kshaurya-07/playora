@@ -29,6 +29,7 @@ import {
   Search,
   Lock,
   Zap,
+  Activity,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -82,7 +83,19 @@ export default function Dashboard() {
       setLocation(`/party/${room.code}`);
     },
     onError: (err) => {
-      toast.error(err.message || "Failed to create party");
+      const rawMsg = err.message || "";
+      if (
+        rawMsg.includes("Zero-length key") ||
+        rawMsg.includes("security configuration") ||
+        rawMsg.includes("JWT_SECRET")
+      ) {
+        toast.error("Unable to create party", {
+          description:
+            "The server security configuration is incomplete. Please check the PlayOra server environment configuration.",
+        });
+      } else {
+        toast.error(rawMsg || "Failed to create party");
+      }
     },
   });
 
@@ -192,6 +205,15 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Button
+              onClick={() => setLocation("/diagnostics")}
+              variant="outline"
+              className="h-9 rounded-xl border-white/10 bg-white/5 text-xs font-bold text-neutral-300 hover:text-white hover:bg-white/10"
+              title="System Diagnostics"
+            >
+              <Activity size={14} className="mr-1.5 text-[#d6ff3f]" />
+              <span className="hidden sm:inline">Diagnostics</span>
+            </Button>
             <Button
               onClick={() => setJoinOpen(true)}
               variant="outline"

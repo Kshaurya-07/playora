@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import { WatchRoomPage } from "./pages/WatchRoomPage";
+import DiagnosticsPage from "./pages/DiagnosticsPage";
 
 function PartyRoute() {
   const params = useParams<{ code: string }>();
@@ -18,6 +19,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/dashboard" component={Dashboard} />
+      <Route path="/diagnostics" component={DiagnosticsPage} />
       <Route path="/party/:code" component={PartyRoute} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

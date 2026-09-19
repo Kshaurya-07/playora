@@ -29,8 +29,30 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 import { initWebSocketServer } from "../socket";
+import { validateStartupEnvironment } from "./envValidator";
 
 async function startServer() {
+  const validation = validateStartupEnvironment();
+  if (!validation.isValid) {
+    console.error(
+      "\n" +
+      "======================================================================\n" +
+      "[PLAYORA STARTUP CONFIGURATION ERROR]\n" +
+      "The server cannot start due to missing security configuration:\n" +
+      validation.errors.map((e) => `  ✗ ${e}`).join("\n") +
+      "\n\nPlease review .env.example or set the required environment variables.\n" +
+      "======================================================================\n"
+    );
+    throw new Error(`Startup failed: ${validation.errors.join("; ")}`);
+  }
+
+  if (validation.warnings.length > 0) {
+    console.log(
+      "[Startup Diagnostic]\n" +
+      validation.warnings.map((w) => `  ℹ ${w}`).join("\n")
+    );
+  }
+
   const app = express();
   const server = createServer(app);
   initWebSocketServer(server);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
+import { getSystemDiagnostics } from "./envValidator";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -12,6 +13,10 @@ export const systemRouter = router({
     .query(() => ({
       ok: true,
     })),
+
+  diagnostics: publicProcedure.query(async () => {
+    return await getSystemDiagnostics();
+  }),
 
   notifyOwner: adminProcedure
     .input(

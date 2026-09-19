@@ -13,6 +13,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+.dev_secret
 
 # IDE and editor files
 .vscode/

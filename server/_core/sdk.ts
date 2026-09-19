@@ -153,8 +153,13 @@ class SDKServer {
     return new Map(Object.entries(parsed));
   }
 
-  private getSessionSecret() {
+  private getSessionSecret(): Uint8Array {
     const secret = ENV.cookieSecret;
+    if (!secret || secret.trim().length === 0) {
+      throw new Error(
+        "Security configuration error: Session secret is not configured or empty. Check server JWT_SECRET configuration."
+      );
+    }
     return new TextEncoder().encode(secret);
   }
 
@@ -170,8 +175,8 @@ class SDKServer {
     return this.signSession(
       {
         openId,
-        appId: ENV.appId,
-        name: options.name || "",
+        appId: ENV.appId || "playora",
+        name: options.name || "Guest",
       },
       options
     );
@@ -186,14 +191,21 @@ class SDKServer {
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name,
-    })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setExpirationTime(expirationSeconds)
-      .sign(secretKey);
+    try {
+      return await new SignJWT({
+        openId: payload.openId,
+        appId: payload.appId || "playora",
+        name: payload.name || "Guest",
+      })
+        .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+        .setExpirationTime(expirationSeconds)
+        .sign(secretKey);
+    } catch (err: any) {
+      console.error("[Security] Error signing session token:", err);
+      throw new Error(
+        `Failed to sign session token: ${err.message || "Cryptographic error"}`
+      );
+    }
   }
 
   async verifySession(
@@ -211,19 +223,15 @@ class SDKServer {
       });
       const { openId, appId, name } = payload as Record<string, unknown>;
 
-      if (
-        !isNonEmptyString(openId) ||
-        !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
-      ) {
-        console.warn("[Auth] Session payload missing required fields");
+      if (!isNonEmptyString(openId)) {
+        console.warn("[Auth] Session payload missing required openId");
         return null;
       }
 
       return {
         openId,
-        appId,
-        name,
+        appId: isNonEmptyString(appId) ? (appId as string) : "playora",
+        name: isNonEmptyString(name) ? (name as string) : "Guest",
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
