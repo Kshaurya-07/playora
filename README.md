@@ -15,6 +15,11 @@
 
 ## ✨ Features
 
+- 👤 **User Accounts & Google Authentication**: Sign in securely with Google or continue as a guest with persistent profiles, custom avatars, and account metrics.
+- 🛑 **Authoritative Party Lifecycle**: Dedicated host-only "End Party" control with confirmation modal, real-time `party_ended` broadcast, and participant "Leave Party" functionality.
+- 🔴 **Concluded Session Recaps**: Dedicated ended room UI on `/party/:code` displaying duration, platform, host, and recap metrics.
+- 🟢 **Live Active Parties & Watch Party History**: Dedicated `/parties` and `/history` pages with real-time active party discovery, search filters, and one-click re-launch.
+- 📱 **Mobile, Tablet & Laptop Optimization**: Purpose-built device-specific responsive layouts, touch-friendly controls (min 44px), and bottom navigation bar on mobile.
 - ⚡ **Universal Streaming Engine**: Supports YouTube, Twitch, Vimeo, direct MP4/WebM streams, Kick, and OTT platforms.
 - 🎯 **Sub-Second Synchronization**: Real-time WebSocket timeline broadcast with millisecond-accurate NTP clock offset and dynamic drift compensation.
 - 🎙️ **WebRTC Voice Mesh**: Crystal-clear, low-latency peer-to-peer audio calls directly in your browser. No extra software needed.
@@ -27,7 +32,6 @@
 - 📋 **Party Playlist Queue**: Add multiple videos to a collaborative queue with automatic progression to the next video when playback ends.
 - 🛡️ **Hardened Cryptographic Security**: Secure HS256 session token management with zero-length key validation and self-healing development secrets.
 - 🩺 **System Diagnostics Panel**: Live status checks for database, WebSocket signaling, crypto engine, and platform adapters accessible via `/diagnostics`.
-- 📱 **Fully Responsive UI**: Cyberpunk-inspired dark theme crafted with Tailwind CSS, optimized for desktops, tablets, and smartphones.
 
 ---
 

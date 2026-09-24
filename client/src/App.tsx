@@ -8,6 +8,11 @@ import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import { WatchRoomPage } from "./pages/WatchRoomPage";
 import DiagnosticsPage from "./pages/DiagnosticsPage";
+import LoginPage from "./pages/LoginPage";
+import ProfilePage from "./pages/ProfilePage";
+import ActivePartiesPage from "./pages/ActivePartiesPage";
+import HistoryPage from "./pages/HistoryPage";
+import { MobileBottomNav } from "./components/MobileBottomNav";
 
 function PartyRoute() {
   const params = useParams<{ code: string }>();
@@ -19,6 +24,10 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/dashboard" component={Dashboard} />
+      <Route path="/login" component={LoginPage} />
+      <Route path="/profile" component={ProfilePage} />
+      <Route path="/parties" component={ActivePartiesPage} />
+      <Route path="/history" component={HistoryPage} />
       <Route path="/diagnostics" component={DiagnosticsPage} />
       <Route path="/party/:code" component={PartyRoute} />
       <Route path="/404" component={NotFound} />
@@ -34,6 +43,7 @@ function App() {
         <TooltipProvider>
           <Toaster position="bottom-right" />
           <Router />
+          <MobileBottomNav />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

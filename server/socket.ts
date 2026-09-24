@@ -47,6 +47,14 @@ interface RoomUserRecord {
 
 const DISCONNECT_GRACE_PERIOD_MS = 15000; // 15 seconds grace period for temporary drops/refreshes
 
+let _broadcastPartyEnded: ((roomCode: string, message?: string) => void) | null = null;
+
+export function broadcastPartyEndedToRoom(roomCode: string, message?: string) {
+  if (_broadcastPartyEnded) {
+    _broadcastPartyEnded(roomCode, message);
+  }
+}
+
 export function initWebSocketServer(server: HttpServer) {
   const wss = new WebSocketServer({ server, path: "/api/ws" });
   const clients = new Map<WebSocket, ClientSession>();
@@ -67,6 +75,26 @@ export function initWebSocketServer(server: HttpServer) {
         socket.send(payload);
       }
     }
+  };
+
+  _broadcastPartyEnded = (roomCode: string, message?: string) => {
+    const code = roomCode.toUpperCase();
+    broadcastToRoom(code, {
+      type: "party_ended",
+      message: message || "This watch party has been ended by the host.",
+      endedAt: new Date().toISOString(),
+    });
+    const users = roomMembers.get(code);
+    if (users) {
+      for (const record of users.values()) {
+        if (record.disconnectTimeout) {
+          clearTimeout(record.disconnectTimeout);
+        }
+      }
+      roomMembers.delete(code);
+    }
+    roomSockets.delete(code);
+    roomQueues.delete(code);
   };
 
   const getRoomMembers = (roomCode: string): RoomPresenceMember[] => {
@@ -122,6 +150,10 @@ export function initWebSocketServer(server: HttpServer) {
 
     if (isExplicitLeave) {
       // User explicitly clicked "Leave Party"
+      db.getRoomByCode(roomCode).then(r => {
+        if (r) db.recordMemberLeave(r.id, userId);
+      }).catch(() => {});
+
       if (userRecord.disconnectTimeout) {
         clearTimeout(userRecord.disconnectTimeout);
         userRecord.disconnectTimeout = undefined;
@@ -171,6 +203,10 @@ export function initWebSocketServer(server: HttpServer) {
 
     userRecord.disconnectTimeout = setTimeout(() => {
       // Grace period expired without reconnection!
+      db.getRoomByCode(roomCode).then(r => {
+        if (r) db.recordMemberLeave(r.id, userId);
+      }).catch(() => {});
+
       const currentUsers = roomMembers.get(roomCode);
       if (currentUsers && currentUsers.get(userId) === userRecord) {
         currentUsers.delete(userId);
@@ -260,6 +296,17 @@ export function initWebSocketServer(server: HttpServer) {
           sockets.add(ws);
 
           let room = await db.getRoomByCode(roomCode);
+          if (room && room.status === "ended") {
+            ws.send(
+              JSON.stringify({
+                type: "party_ended",
+                message: "This watch party has already ended.",
+                endedAt: room.endedAt ? room.endedAt.toISOString() : new Date().toISOString(),
+              })
+            );
+            return;
+          }
+
           if (!room) {
             room = await db.createRoom({
               code: roomCode,
@@ -278,6 +325,8 @@ export function initWebSocketServer(server: HttpServer) {
               },
             });
           }
+
+          await db.recordMemberJoin(room.id, userId, session.role);
 
           let isFirstJoin = false;
           let userRecord = users.get(userId);
@@ -371,6 +420,25 @@ export function initWebSocketServer(server: HttpServer) {
 
         if (type === "leave_room") {
           handleSocketDisconnect(ws, true);
+          return;
+        }
+
+        if (type === "end_party") {
+          const roomCode = session.roomCode?.toUpperCase();
+          if (!roomCode) return;
+          const room = await db.getRoomByCode(roomCode);
+          if (!room) return;
+          if (room.hostId !== session.userId && session.role !== "host") {
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "Only the host can end this watch party.",
+              })
+            );
+            return;
+          }
+          await db.endRoom(room.id);
+          broadcastPartyEndedToRoom(roomCode, "Watch party ended by the host.");
           return;
         }
 

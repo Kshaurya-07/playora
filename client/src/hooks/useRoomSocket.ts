@@ -58,6 +58,7 @@ export interface UseRoomSocketProps {
   onCountdownTick?: (count: number, message: string) => void;
   onContentChanged?: (data: { contentUrl: string; platform: string; title: string }) => void;
   onKicked?: (message: string) => void;
+  onPartyEnded?: (data: { message: string; endedAt?: string }) => void;
 }
 
 export type RoomConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -73,6 +74,7 @@ export function useRoomSocket({
   onCountdownTick,
   onContentChanged,
   onKicked,
+  onPartyEnded,
 }: UseRoomSocketProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<RoomConnectionStatus>("connecting");
@@ -106,6 +108,7 @@ export function useRoomSocket({
     onCountdownTick,
     onContentChanged,
     onKicked,
+    onPartyEnded,
   });
   useEffect(() => {
     callbacksRef.current = {
@@ -114,6 +117,7 @@ export function useRoomSocket({
       onCountdownTick,
       onContentChanged,
       onKicked,
+      onPartyEnded,
     };
   });
 
@@ -267,6 +271,12 @@ export function useRoomSocket({
 
         if (data.type === "settings_update") {
           setRoomSettings((prev: any) => ({ ...prev, ...data.settings }));
+          return;
+        }
+
+        if (data.type === "party_ended") {
+          setConnectionStatus("disconnected");
+          callbacksRef.current.onPartyEnded?.(data);
           return;
         }
 
@@ -567,6 +577,15 @@ export function useRoomSocket({
     }
   }, []);
 
+  // Authoritative Host End Party
+  const endParty = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: "end_party" }));
+      } catch {}
+    }
+  }, []);
+
   // Authoritative intentional room exit
   const leaveRoom = useCallback(() => {
     membershipStateRef.current = "LEAVING";
@@ -614,5 +633,6 @@ export function useRoomSocket({
     kickPeer,
     updateSettings,
     leaveRoom,
+    endParty,
   };
 }

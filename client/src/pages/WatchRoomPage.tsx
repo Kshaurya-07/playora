@@ -50,6 +50,18 @@ import {
   Radio,
 } from "lucide-react";
 
+function formatDuration(startedAt?: Date | string | null, endedAt?: Date | string | null) {
+  if (!startedAt || !endedAt) return "Concluded";
+  const start = new Date(startedAt).getTime();
+  const end = new Date(endedAt).getTime();
+  const diffSec = Math.max(0, Math.floor((end - start) / 1000));
+  const mins = Math.floor(diffSec / 60);
+  const hours = Math.floor(mins / 60);
+  const remainingMins = mins % 60;
+  if (hours > 0) return `${hours}h ${remainingMins}m`;
+  return `${mins}m`;
+}
+
 interface WatchRoomPageProps {
   code: string;
 }
@@ -67,6 +79,12 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       refetchOnWindowFocus: false,
     }
   );
+
+  // Party lifecycle & Concluded state
+  const [isPartyEnded, setIsPartyEnded] = useState(false);
+  const [partyEndedMessage, setPartyEndedMessage] = useState("");
+  const [partyEndedAt, setPartyEndedAt] = useState<string | null>(null);
+  const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
 
   // Modals & Panels state
   const [activeTab, setActiveTab] = useState<"chat" | "people">("chat");
@@ -135,6 +153,7 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     kickPeer,
     updateSettings,
     leaveRoom,
+    endParty,
   } = useRoomSocket({
     roomCode: cleanCode,
     user: socketUser,
@@ -158,6 +177,12 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       toast.error(msg);
       setLocation("/dashboard");
     }, [setLocation]),
+    onPartyEnded: useCallback((data: { message: string; endedAt?: string }) => {
+      setIsPartyEnded(true);
+      setPartyEndedMessage(data.message || "This watch party has concluded.");
+      if (data.endedAt) setPartyEndedAt(data.endedAt);
+      toast.info("The watch party has ended.");
+    }, []),
   });
 
   // Voice Chat Hook
@@ -173,12 +198,35 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
   });
   voiceChatRef.current = voiceChat;
 
+  // End Party & Leave Party Mutations
+  const endPartyMutation = trpc.party.end.useMutation({
+    onSuccess: () => {
+      endParty();
+      setIsPartyEnded(true);
+      setShowEndConfirmModal(false);
+      toast.success("Watch party ended.");
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to end party.");
+    },
+  });
+
+  const handleConfirmEndParty = () => {
+    endParty();
+    endPartyMutation.mutate({ code: cleanCode });
+  };
+
+  const leavePartyMutation = trpc.party.leave.useMutation();
+
   // Authoritative Leave Room (Requirement 21)
   const handleLeaveRoom = useCallback(() => {
     voiceChat.leaveVoice();
     leaveRoom();
+    if (user?.id) {
+      leavePartyMutation.mutate({ code: cleanCode });
+    }
     setLocation("/dashboard");
-  }, [voiceChat, leaveRoom, setLocation]);
+  }, [voiceChat, leaveRoom, setLocation, user, cleanCode, leavePartyMutation]);
 
   const isHost = role === "host" || room?.hostId === socketUser.id;
   const canControl = isHost || !roomSettings?.hostOnlyControls;
@@ -389,6 +437,99 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
         );
     }
   };
+
+  // Render Concluded Room Screen if ended
+  if (isPartyEnded || room?.status === "ended") {
+    const started = room?.startedAt || room?.createdAt;
+    const ended = partyEndedAt || room?.endedAt || new Date();
+    const duration = formatDuration(started, ended);
+
+    return (
+      <div className="min-h-screen bg-[#07090e] text-white flex flex-col justify-between p-4 sm:p-6 relative overflow-hidden">
+        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-red-500/10 blur-[140px] pointer-events-none" />
+
+        <header className="flex items-center justify-between border-b border-white/5 pb-4">
+          <div className="flex items-center gap-2.5 select-none">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#d6ff3f] text-[#0a0d14] shadow-[0_0_20px_rgba(214,255,63,0.3)]">
+              <Waves size={20} strokeWidth={2.6} />
+            </div>
+            <span className="text-xl font-extrabold tracking-tight text-white">
+              playora<span className="text-[#d6ff3f]">.</span>
+            </span>
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setLocation("/dashboard")}
+            className="text-zinc-400 hover:text-white"
+          >
+            Dashboard
+          </Button>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center py-10 relative z-10">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#0d111b]/90 p-6 sm:p-8 backdrop-blur-2xl shadow-2xl space-y-6 text-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-bold uppercase tracking-wider">
+              <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>
+              <span>Watch Party Concluded</span>
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+                {room?.title || activeTitle}
+              </h1>
+              <p className="text-sm text-zinc-400">
+                {partyEndedMessage || "This watch party has been concluded by the host. Thank you for watching together!"}
+              </p>
+            </div>
+
+            {/* Recap Metrics Card */}
+            <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 text-left grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-zinc-500 font-medium">Platform</span>
+                <p className="font-bold text-white uppercase mt-0.5">{room?.platform || resolvedContent.platformName}</p>
+              </div>
+              <div>
+                <span className="text-zinc-500 font-medium">Room Code</span>
+                <p className="font-mono font-bold text-[#d6ff3f] mt-0.5">{cleanCode}</p>
+              </div>
+              <div>
+                <span className="text-zinc-500 font-medium">Session Duration</span>
+                <p className="font-bold text-white mt-0.5">{duration}</p>
+              </div>
+              <div>
+                <span className="text-zinc-500 font-medium">Concluded At</span>
+                <p className="font-bold text-white mt-0.5">
+                  {new Date(ended).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <Button
+                onClick={() => setLocation("/dashboard")}
+                className="flex-1 bg-[#d6ff3f] hover:bg-[#c2ea32] text-[#0a0d14] font-bold h-11 rounded-xl"
+              >
+                Return to Dashboard
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setLocation("/history")}
+                className="flex-1 border-white/10 hover:bg-white/5 text-white h-11 rounded-xl"
+              >
+                View History
+              </Button>
+            </div>
+          </div>
+        </main>
+
+        <footer className="text-center text-xs text-zinc-500 py-2">
+          PlayOra &copy; 2026. Synchronized Social Streaming.
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="playora-shell flex min-h-screen flex-col overflow-hidden">
@@ -626,19 +767,65 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
             <span className="hidden sm:inline">Invite</span>
           </Button>
 
-          {/* Leave Party Button (Requirement 21) */}
-          <Button
-            onClick={handleLeaveRoom}
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg border-red-500/20 bg-red-500/5 px-2 text-xs font-bold text-red-400 hover:bg-red-500/10 hover:border-red-500/40"
-            title="Leave Watch Party"
-          >
-            <LogOut size={13} className="sm:mr-1.5" />
-            <span className="hidden sm:inline">Leave</span>
-          </Button>
+          {/* Host End Party vs Participant Leave Party */}
+          {isHost ? (
+            <Button
+              onClick={() => setShowEndConfirmModal(true)}
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg border-red-500/30 bg-red-500/10 px-2.5 text-xs font-bold text-red-400 hover:bg-red-500/20 hover:border-red-500/50"
+              title="End Watch Party for everyone"
+            >
+              <LogOut size={13} className="sm:mr-1.5" />
+              <span>End Party</span>
+            </Button>
+          ) : (
+            <Button
+              onClick={handleLeaveRoom}
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg border-red-500/20 bg-red-500/5 px-2 text-xs font-bold text-red-400 hover:bg-red-500/10 hover:border-red-500/40"
+              title="Leave Watch Party"
+            >
+              <LogOut size={13} className="sm:mr-1.5" />
+              <span>Leave</span>
+            </Button>
+          )}
         </div>
       </header>
+
+      {/* End Watch Party Confirmation Modal */}
+      {showEndConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-3xl border border-red-500/30 bg-[#0d111b] p-6 shadow-2xl space-y-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/15 text-red-400 mx-auto">
+              <LogOut size={24} />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-bold text-white">End Watch Party for Everyone?</h3>
+              <p className="text-xs text-zinc-400">
+                Ending this party will disconnect all participants, stop synchronized playback, and archive this session to your history.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowEndConfirmModal(false)}
+                className="flex-1 border-white/10 text-zinc-300 hover:text-white"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmEndParty}
+                disabled={endPartyMutation.isPending}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold"
+              >
+                {endPartyMutation.isPending ? "Ending..." : "Yes, End Party"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reconnecting Banner (Requirement 9 & 26) */}
       {connectionStatus === "reconnecting" && (

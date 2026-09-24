@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertMessage,
@@ -38,6 +38,9 @@ export async function getDb() {
 class MemoryStore {
   users = new Map<number, User>();
   usersByOpenId = new Map<string, User>();
+  usersByEmail = new Map<string, User>();
+  usersByGoogleId = new Map<string, User>();
+
   rooms = new Map<number, Room>();
   roomsByCode = new Map<string, Room>();
   members = new Map<number, RoomMember>();
@@ -51,20 +54,34 @@ class MemoryStore {
   private nextEventId = 1;
 
   upsertUser(user: InsertUser): User {
-    let existing = user.openId ? this.usersByOpenId.get(user.openId) : undefined;
+    let existing: User | undefined;
+    if (user.openId) {
+      existing = this.usersByOpenId.get(user.openId);
+    }
+    if (!existing && user.googleId) {
+      existing = this.usersByGoogleId.get(user.googleId);
+    }
+    if (!existing && user.email) {
+      existing = this.usersByEmail.get(user.email.toLowerCase().trim());
+    }
+
     if (existing) {
       const updated: User = {
         ...existing,
         name: user.name ?? existing.name,
-        email: user.email ?? existing.email,
+        email: user.email ? user.email.toLowerCase().trim() : existing.email,
         avatarColor: user.avatarColor ?? existing.avatarColor,
+        avatarUrl: user.avatarUrl ?? existing.avatarUrl,
+        googleId: user.googleId ?? existing.googleId,
         loginMethod: user.loginMethod ?? existing.loginMethod,
         role: user.role ?? existing.role,
         lastSignedIn: user.lastSignedIn ?? new Date(),
         updatedAt: new Date(),
       };
       this.users.set(existing.id, updated);
-      this.usersByOpenId.set(existing.openId, updated);
+      if (updated.openId) this.usersByOpenId.set(updated.openId, updated);
+      if (updated.googleId) this.usersByGoogleId.set(updated.googleId, updated);
+      if (updated.email) this.usersByEmail.set(updated.email.toLowerCase().trim(), updated);
       return updated;
     }
 
@@ -72,8 +89,10 @@ class MemoryStore {
       id: this.nextUserId++,
       openId: user.openId,
       name: user.name ?? "Guest " + Math.floor(1000 + Math.random() * 9000),
-      email: user.email ?? null,
+      email: user.email ? user.email.toLowerCase().trim() : null,
       avatarColor: user.avatarColor ?? "#D6FF3F",
+      avatarUrl: user.avatarUrl ?? null,
+      googleId: user.googleId ?? null,
       loginMethod: user.loginMethod ?? "guest",
       role: user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user"),
       createdAt: new Date(),
@@ -81,7 +100,9 @@ class MemoryStore {
       lastSignedIn: new Date(),
     };
     this.users.set(newUser.id, newUser);
-    this.usersByOpenId.set(newUser.openId, newUser);
+    if (newUser.openId) this.usersByOpenId.set(newUser.openId, newUser);
+    if (newUser.googleId) this.usersByGoogleId.set(newUser.googleId, newUser);
+    if (newUser.email) this.usersByEmail.set(newUser.email.toLowerCase().trim(), newUser);
     return newUser;
   }
 
@@ -93,6 +114,31 @@ class MemoryStore {
     return this.usersByOpenId.get(openId);
   }
 
+  getUserByEmail(email: string): User | undefined {
+    return this.usersByEmail.get(email.toLowerCase().trim());
+  }
+
+  getUserByGoogleId(googleId: string): User | undefined {
+    return this.usersByGoogleId.get(googleId);
+  }
+
+  updateUserProfile(
+    userId: number,
+    data: { name?: string; avatarColor?: string; avatarUrl?: string }
+  ): User | undefined {
+    const user = this.users.get(userId);
+    if (!user) return undefined;
+    if (data.name !== undefined) user.name = data.name.trim();
+    if (data.avatarColor !== undefined) user.avatarColor = data.avatarColor;
+    if (data.avatarUrl !== undefined) user.avatarUrl = data.avatarUrl;
+    user.updatedAt = new Date();
+    this.users.set(userId, user);
+    if (user.openId) this.usersByOpenId.set(user.openId, user);
+    if (user.googleId) this.usersByGoogleId.set(user.googleId, user);
+    if (user.email) this.usersByEmail.set(user.email.toLowerCase().trim(), user);
+    return user;
+  }
+
   createRoom(room: InsertRoom): Room {
     const newRoom: Room = {
       id: this.nextRoomId++,
@@ -101,6 +147,9 @@ class MemoryStore {
       platform: room.platform ?? "youtube",
       contentUrl: room.contentUrl,
       hostId: room.hostId,
+      status: room.status ?? "active",
+      startedAt: room.startedAt ?? new Date(),
+      endedAt: room.endedAt ?? null,
       isPlaying: room.isPlaying ?? false,
       currentPosition: room.currentPosition ?? 0,
       positionUpdatedAt: new Date(),
@@ -116,6 +165,10 @@ class MemoryStore {
     };
     this.rooms.set(newRoom.id, newRoom);
     this.roomsByCode.set(newRoom.code.toUpperCase(), newRoom);
+
+    // Host automatically joins as member
+    this.recordMemberJoin(newRoom.id, newRoom.hostId, "host");
+
     return newRoom;
   }
 
@@ -127,11 +180,47 @@ class MemoryStore {
     return this.rooms.get(id);
   }
 
+  endRoom(roomId: number): Room | undefined {
+    const room = this.rooms.get(roomId);
+    if (!room) return undefined;
+    room.status = "ended";
+    room.endedAt = new Date();
+    room.isPlaying = false;
+    room.updatedAt = new Date();
+
+    // Mark active members as left
+    for (const member of this.members.values()) {
+      if (member.roomId === roomId && !member.leftAt) {
+        member.leftAt = new Date();
+      }
+    }
+
+    return room;
+  }
+
   listActiveRooms(): Room[] {
     return Array.from(this.rooms.values())
-      .filter(r => r.settings.isPublic)
+      .filter(r => r.status === "active" && (r.settings?.isPublic !== false))
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
-      .slice(0, 20);
+      .slice(0, 30);
+  }
+
+  listHistoryRooms(userId?: number): Room[] {
+    return Array.from(this.rooms.values())
+      .filter(r => {
+        if (r.status !== "ended") return false;
+        if (!userId) return true;
+        if (r.hostId === userId) return true;
+        return Array.from(this.members.values()).some(
+          m => m.roomId === r.id && m.userId === userId
+        );
+      })
+      .sort((a, b) => {
+        const timeB = b.endedAt?.getTime() ?? b.updatedAt.getTime();
+        const timeA = a.endedAt?.getTime() ?? a.updatedAt.getTime();
+        return timeB - timeA;
+      })
+      .slice(0, 50);
   }
 
   updateRoomPlayback(
@@ -183,6 +272,66 @@ class MemoryStore {
     room.hostId = hostId;
     room.updatedAt = new Date();
     return room;
+  }
+
+  recordMemberJoin(
+    roomId: number,
+    userId: number,
+    role: "host" | "moderator" | "participant" = "participant"
+  ): RoomMember {
+    const existing = Array.from(this.members.values()).find(
+      m => m.roomId === roomId && m.userId === userId
+    );
+    if (existing) {
+      existing.role = role;
+      existing.leftAt = null;
+      existing.lastSeenAt = new Date();
+      return existing;
+    }
+    const newMember: RoomMember = {
+      id: this.nextMemberId++,
+      roomId,
+      userId,
+      role,
+      isMuted: false,
+      joinedAt: new Date(),
+      leftAt: null,
+      lastSeenAt: new Date(),
+    };
+    this.members.set(newMember.id, newMember);
+    return newMember;
+  }
+
+  recordMemberLeave(roomId: number, userId: number): void {
+    const existing = Array.from(this.members.values()).find(
+      m => m.roomId === roomId && m.userId === userId && !m.leftAt
+    );
+    if (existing) {
+      existing.leftAt = new Date();
+      existing.lastSeenAt = new Date();
+    }
+  }
+
+  getUserStats(userId: number) {
+    const hosted = Array.from(this.rooms.values()).filter(r => r.hostId === userId);
+    const hostedCount = hosted.length;
+
+    const joinedRoomIds = new Set(
+      Array.from(this.members.values())
+        .filter(m => m.userId === userId && m.role !== "host")
+        .map(m => m.roomId)
+    );
+    const joinedCount = joinedRoomIds.size;
+
+    const activeRooms = hosted.filter(r => r.status === "active");
+    const historyRooms = this.listHistoryRooms(userId);
+
+    return {
+      hostedCount,
+      joinedCount,
+      activeRooms,
+      historyRooms,
+    };
   }
 
   addMessage(message: InsertMessage): Message {
@@ -243,9 +392,11 @@ export async function upsertUser(user: InsertUser): Promise<User> {
     const values: InsertUser = {
       openId: user.openId,
       name: user.name,
-      email: user.email,
-      avatarColor: user.avatarColor,
-      loginMethod: user.loginMethod,
+      email: user.email ? user.email.toLowerCase().trim() : null,
+      avatarColor: user.avatarColor ?? "#D6FF3F",
+      avatarUrl: user.avatarUrl ?? null,
+      googleId: user.googleId ?? null,
+      loginMethod: user.loginMethod ?? "guest",
       role: user.openId === ENV.ownerOpenId ? "admin" : (user.role ?? "user"),
       lastSignedIn: new Date(),
     };
@@ -255,6 +406,8 @@ export async function upsertUser(user: InsertUser): Promise<User> {
         name: values.name,
         email: values.email,
         avatarColor: values.avatarColor,
+        avatarUrl: values.avatarUrl,
+        googleId: values.googleId,
         lastSignedIn: new Date(),
       },
     });
@@ -297,6 +450,59 @@ export async function getUserById(id: number): Promise<User | undefined> {
   }
 }
 
+export async function getUserByEmail(email: string): Promise<User | undefined> {
+  const normalized = email.toLowerCase().trim();
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.getUserByEmail(normalized);
+  }
+
+  try {
+    const result = await db.select().from(users).where(eq(users.email, normalized)).limit(1);
+    return result.length > 0 ? result[0] : memoryStore.getUserByEmail(normalized);
+  } catch (error) {
+    return memoryStore.getUserByEmail(normalized);
+  }
+}
+
+export async function getUserByGoogleId(googleId: string): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.getUserByGoogleId(googleId);
+  }
+
+  try {
+    const result = await db.select().from(users).where(eq(users.googleId, googleId)).limit(1);
+    return result.length > 0 ? result[0] : memoryStore.getUserByGoogleId(googleId);
+  } catch (error) {
+    return memoryStore.getUserByGoogleId(googleId);
+  }
+}
+
+export async function updateUserProfile(
+  userId: number,
+  data: { name?: string; avatarColor?: string; avatarUrl?: string }
+): Promise<User | undefined> {
+  memoryStore.updateUserProfile(userId, data);
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.getUserById(userId);
+  }
+
+  try {
+    const updateData: any = { updatedAt: new Date() };
+    if (data.name !== undefined) updateData.name = data.name.trim();
+    if (data.avatarColor !== undefined) updateData.avatarColor = data.avatarColor;
+    if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl;
+
+    await db.update(users).set(updateData).where(eq(users.id, userId));
+    return getUserById(userId);
+  } catch (error) {
+    console.error("[Database] Failed to update user profile:", error);
+    return memoryStore.getUserById(userId);
+  }
+}
+
 export async function createRoom(room: InsertRoom): Promise<Room> {
   const db = await getDb();
   if (!db) {
@@ -306,7 +512,11 @@ export async function createRoom(room: InsertRoom): Promise<Room> {
   try {
     const [inserted] = await db.insert(rooms).values(room).$returningId();
     const result = await db.select().from(rooms).where(eq(rooms.id, inserted.id)).limit(1);
-    return result[0];
+    const created = result[0] || memoryStore.createRoom(room);
+    
+    // Automatically record host membership
+    await recordMemberJoin(created.id, created.hostId, "host");
+    return created;
   } catch (error) {
     console.error("[Database] Failed to insert room, using memory store:", error);
     return memoryStore.createRoom(room);
@@ -341,6 +551,38 @@ export async function getRoomById(id: number): Promise<Room | undefined> {
   }
 }
 
+export async function endRoom(roomId: number): Promise<Room | undefined> {
+  memoryStore.endRoom(roomId);
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.getRoomById(roomId);
+  }
+
+  try {
+    const now = new Date();
+    await db
+      .update(rooms)
+      .set({
+        status: "ended",
+        endedAt: now,
+        isPlaying: false,
+        updatedAt: now,
+      })
+      .where(eq(rooms.id, roomId));
+
+    // Mark members as left
+    await db
+      .update(roomMembers)
+      .set({ leftAt: now })
+      .where(eq(roomMembers.roomId, roomId));
+
+    return getRoomById(roomId);
+  } catch (error) {
+    console.error("[Database] Failed to end room:", error);
+    return memoryStore.getRoomById(roomId);
+  }
+}
+
 export async function listActiveRooms(): Promise<Room[]> {
   const db = await getDb();
   if (!db) {
@@ -348,10 +590,133 @@ export async function listActiveRooms(): Promise<Room[]> {
   }
 
   try {
-    const result = await db.select().from(rooms).orderBy(desc(rooms.updatedAt)).limit(20);
+    const result = await db
+      .select()
+      .from(rooms)
+      .where(eq(rooms.status, "active"))
+      .orderBy(desc(rooms.updatedAt))
+      .limit(30);
     return result.length > 0 ? result : memoryStore.listActiveRooms();
   } catch (error) {
     return memoryStore.listActiveRooms();
+  }
+}
+
+export async function listHistoryRooms(userId?: number): Promise<Room[]> {
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.listHistoryRooms(userId);
+  }
+
+  try {
+    if (userId) {
+      const result = await db
+        .select()
+        .from(rooms)
+        .where(and(eq(rooms.status, "ended"), eq(rooms.hostId, userId)))
+        .orderBy(desc(rooms.endedAt))
+        .limit(50);
+      return result.length > 0 ? result : memoryStore.listHistoryRooms(userId);
+    }
+
+    const result = await db
+      .select()
+      .from(rooms)
+      .where(eq(rooms.status, "ended"))
+      .orderBy(desc(rooms.endedAt))
+      .limit(50);
+    return result.length > 0 ? result : memoryStore.listHistoryRooms(userId);
+  } catch (error) {
+    return memoryStore.listHistoryRooms(userId);
+  }
+}
+
+export async function recordMemberJoin(
+  roomId: number,
+  userId: number,
+  role: "host" | "moderator" | "participant" = "participant"
+): Promise<RoomMember> {
+  const memMember = memoryStore.recordMemberJoin(roomId, userId, role);
+  const db = await getDb();
+  if (!db) return memMember;
+
+  try {
+    const existing = await db
+      .select()
+      .from(roomMembers)
+      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db
+        .update(roomMembers)
+        .set({ role, leftAt: null, lastSeenAt: new Date() })
+        .where(eq(roomMembers.id, existing[0].id));
+      return { ...existing[0], role, leftAt: null, lastSeenAt: new Date() };
+    } else {
+      const [inserted] = await db
+        .insert(roomMembers)
+        .values({
+          roomId,
+          userId,
+          role,
+          isMuted: false,
+          joinedAt: new Date(),
+          lastSeenAt: new Date(),
+        })
+        .$returningId();
+      const res = await db.select().from(roomMembers).where(eq(roomMembers.id, inserted.id)).limit(1);
+      return res[0] || memMember;
+    }
+  } catch (error) {
+    console.error("[Database] Failed to record member join:", error);
+    return memMember;
+  }
+}
+
+export async function recordMemberLeave(roomId: number, userId: number): Promise<void> {
+  memoryStore.recordMemberLeave(roomId, userId);
+  const db = await getDb();
+  if (!db) return;
+
+  try {
+    await db
+      .update(roomMembers)
+      .set({ leftAt: new Date(), lastSeenAt: new Date() })
+      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+  } catch (error) {
+    console.error("[Database] Failed to record member leave:", error);
+  }
+}
+
+export async function getUserStats(userId: number) {
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.getUserStats(userId);
+  }
+
+  try {
+    const hosted = await db.select().from(rooms).where(eq(rooms.hostId, userId));
+    const hostedCount = hosted.length;
+
+    const memberships = await db
+      .select()
+      .from(roomMembers)
+      .where(eq(roomMembers.userId, userId));
+    const joinedRoomIds = new Set(memberships.map(m => m.roomId));
+    const joinedCount = joinedRoomIds.size;
+
+    const activeRooms = hosted.filter(r => r.status === "active");
+    const historyRooms = await listHistoryRooms(userId);
+
+    return {
+      hostedCount,
+      joinedCount,
+      activeRooms,
+      historyRooms,
+    };
+  } catch (error) {
+    return memoryStore.getUserStats(userId);
   }
 }
 
@@ -477,11 +842,7 @@ export async function deleteMessage(messageId: number, userId: number, isHost = 
   if (!db) return memDeleted;
 
   try {
-    if (isHost) {
-      await db.delete(messages).where(eq(messages.id, messageId));
-    } else {
-      await db.delete(messages).where(eq(messages.id, messageId));
-    }
+    await db.delete(messages).where(eq(messages.id, messageId));
     return true;
   } catch (error) {
     return memDeleted;

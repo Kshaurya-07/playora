@@ -1,5 +1,6 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { TRPCError } from "@trpc/server";
+import { decodeJwt } from "jose";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import * as db from "./db";
@@ -8,6 +9,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { broadcastPartyEndedToRoom } from "./socket";
 
 export const appRouter = router({
   system: systemRouter,
@@ -56,18 +58,110 @@ export const appRouter = router({
         return user;
       }),
 
+    googleLogin: publicProcedure
+      .input(
+        z.object({
+          credential: z.string().optional(),
+          profile: z
+            .object({
+              googleId: z.string(),
+              email: z.string().email(),
+              name: z.string(),
+              avatarUrl: z.string().optional(),
+            })
+            .optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        let googleId = "";
+        let email = "";
+        let name = "";
+        let avatarUrl: string | undefined = undefined;
+
+        if (input.credential) {
+          try {
+            const decoded = decodeJwt(input.credential) as Record<string, any>;
+            googleId = decoded.sub || "";
+            email = decoded.email || "";
+            name = decoded.name || decoded.given_name || "Google User";
+            avatarUrl = decoded.picture || undefined;
+          } catch (e) {
+            console.warn("[Auth] Failed to decode Google credential:", e);
+          }
+        }
+
+        if (!googleId && input.profile) {
+          googleId = input.profile.googleId;
+          email = input.profile.email;
+          name = input.profile.name;
+          avatarUrl = input.profile.avatarUrl;
+        }
+
+        if (!googleId || !email) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invalid Google authentication payload.",
+          });
+        }
+
+        // Look for existing user by googleId or email
+        let existing = await db.getUserByGoogleId(googleId);
+        if (!existing && email) {
+          existing = await db.getUserByEmail(email);
+        }
+        if (!existing && ctx.user?.id) {
+          existing = ctx.user;
+        }
+
+        const openId = existing ? existing.openId : `google_${googleId}`;
+
+        const user = await db.upsertUser({
+          openId,
+          googleId,
+          name: name || existing?.name || "Google User",
+          email,
+          avatarUrl: avatarUrl || existing?.avatarUrl || null,
+          avatarColor: existing?.avatarColor || "#4285F4",
+          loginMethod: "google",
+          role: existing?.role || "user",
+          lastSignedIn: new Date(),
+        });
+
+        try {
+          const sessionToken = await sdk.createSessionToken(openId, {
+            name: user.name || name || "Google User",
+            expiresInMs: ONE_YEAR_MS,
+          });
+          const cookieOptions = getSessionCookieOptions(ctx.req);
+          ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        } catch (tokenErr: any) {
+          console.error("[Auth] Failed to sign Google session token:", tokenErr);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to establish secure session for Google account.",
+          });
+        }
+
+        return { success: true, user };
+      }),
+
+    getStats: protectedProcedure.query(async ({ ctx }) => {
+      return db.getUserStats(ctx.user.id);
+    }),
+
     updateProfile: protectedProcedure
       .input(
         z.object({
           name: z.string().min(1).max(64),
           avatarColor: z.string().min(4).max(32).optional(),
+          avatarUrl: z.string().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const updated = await db.upsertUser({
-          openId: ctx.user.openId,
+        const updated = await db.updateUserProfile(ctx.user.id, {
           name: input.name.trim(),
-          avatarColor: input.avatarColor ?? ctx.user.avatarColor,
+          avatarColor: input.avatarColor,
+          avatarUrl: input.avatarUrl,
         });
 
         try {
@@ -81,7 +175,7 @@ export const appRouter = router({
           console.error("[Auth] Failed to refresh session token:", tokenErr);
         }
 
-        return updated;
+        return updated || ctx.user;
       }),
 
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -159,6 +253,8 @@ export const appRouter = router({
           platform: finalPlatform,
           contentUrl: finalUrl,
           hostId: userId,
+          status: "active",
+          startedAt: new Date(),
           isPlaying: false,
           currentPosition: 0,
           settings: input.settings ?? {
@@ -189,6 +285,45 @@ export const appRouter = router({
     list: publicProcedure.query(async () => {
       return db.listActiveRooms();
     }),
+
+    listActive: publicProcedure.query(async () => {
+      return db.listActiveRooms();
+    }),
+
+    listHistory: publicProcedure
+      .input(z.object({ userId: z.number().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        return db.listHistoryRooms(input?.userId ?? ctx.user?.id);
+      }),
+
+    end: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const room = await db.getRoomByCode(input.code);
+        if (!room) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Party room not found." });
+        }
+        if (room.hostId !== ctx.user.id && ctx.user.role !== "admin") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only the party host has permission to end this watch party.",
+          });
+        }
+
+        const endedRoom = await db.endRoom(room.id);
+        broadcastPartyEndedToRoom(room.code, "Watch party ended by the host.");
+        return { success: true, room: endedRoom };
+      }),
+
+    leave: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const room = await db.getRoomByCode(input.code);
+        if (room) {
+          await db.recordMemberLeave(room.id, ctx.user.id);
+        }
+        return { success: true };
+      }),
 
     updateSettings: protectedProcedure
       .input(

@@ -19,6 +19,8 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   avatarColor: varchar("avatarColor", { length: 32 }).default("#D6FF3F"),
+  avatarUrl: text("avatarUrl"),
+  googleId: varchar("googleId", { length: 128 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -39,6 +41,9 @@ export const rooms = mysqlTable("rooms", {
   platform: varchar("platform", { length: 64 }).notNull().default("youtube"),
   contentUrl: text("contentUrl").notNull(),
   hostId: int("hostId").notNull(),
+  status: mysqlEnum("status", ["active", "ended"]).default("active").notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  endedAt: timestamp("endedAt"),
   isPlaying: boolean("isPlaying").notNull().default(false),
   currentPosition: double("currentPosition").notNull().default(0),
   positionUpdatedAt: timestamp("positionUpdatedAt").defaultNow().notNull(),
@@ -66,6 +71,7 @@ export const roomMembers = mysqlTable("roomMembers", {
   role: mysqlEnum("role", ["host", "moderator", "participant"]).default("participant").notNull(),
   isMuted: boolean("isMuted").default(false).notNull(),
   joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+  leftAt: timestamp("leftAt"),
   lastSeenAt: timestamp("lastSeenAt").defaultNow().onUpdateNow().notNull(),
 });
 

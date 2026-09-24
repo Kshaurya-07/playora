@@ -1,7 +1,8 @@
-import React, { useState } from "react";
-import { useLocation } from "wouter";
+import React, { useState, useEffect } from "react";
+import { useLocation, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { Navbar } from "@/components/Navbar";
 import {
   PLATFORM_LIST,
   PlatformId,
@@ -30,6 +31,8 @@ import {
   Lock,
   Zap,
   Activity,
+  History as HistoryIcon,
+  ShieldCheck,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -38,6 +41,24 @@ export default function Dashboard() {
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState("");
+
+  // Check URL parameters for re-launching from history
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlParam = params.get("url");
+    const titleParam = params.get("title");
+    if (urlParam) {
+      setContentUrl(urlParam);
+      const res = resolveStreamingContent(urlParam);
+      if (res.platform !== "generic") {
+        setSelectedPlatform(res.platform);
+      }
+      if (titleParam) {
+        setPartyTitle(titleParam);
+      }
+      setCreateOpen(true);
+    }
+  }, []);
 
   // Create form state
   const [partyTitle, setPartyTitle] = useState("Weekend Movie Night");
@@ -70,9 +91,16 @@ export default function Dashboard() {
   const [avatarColor, setAvatarColor] = useState(user?.avatarColor || "#D6FF3F");
   const [isEditingProfile, setIsEditingProfile] = useState(false);
 
-  // Fetch active rooms from backend
+  // Fetch active rooms & history from backend
   const { data: activeRooms, isLoading: loadingRooms, refetch: refetchRooms } =
-    trpc.party.list.useQuery();
+    trpc.party.listActive.useQuery(undefined, { refetchInterval: 10000 });
+
+  const { data: historyRooms, isLoading: loadingHistory } =
+    trpc.party.listHistory.useQuery(undefined, { refetchInterval: 30000 });
+
+  const { data: userStats } = trpc.auth.getStats.useQuery(undefined, {
+    enabled: Boolean(user?.id),
+  });
 
   // Mutations
   const createPartyMutation = trpc.party.create.useMutation({
@@ -185,51 +213,39 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="playora-shell min-h-screen">
+    <div className="playora-shell min-h-screen pb-20 md:pb-10">
       <div className="noise-overlay" />
+      <Navbar />
 
-      {/* Navigation Header */}
-      <header className="relative z-10 border-b border-white/[.08] bg-[#0c0e14]/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setLocation("/")}
-              className="btn-press flex items-center gap-2 text-xs font-bold text-neutral-400 hover:text-white"
-            >
-              <ChevronLeft size={16} /> Home
-            </button>
-            <span className="h-4 w-px bg-white/10" />
-            <span className="text-sm font-extrabold tracking-tight text-white">
-              Party Dashboard
+      {/* Sub-header Quick Actions Bar */}
+      <div className="border-b border-white/5 bg-[#0a0d14]/50 backdrop-blur-sm relative z-10">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 py-3">
+          <div className="flex items-center gap-3">
+            <span className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-2">
+              <Sparkles size={15} className="text-[#d6ff3f]" />
+              Watch Party Dashboard
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button
-              onClick={() => setLocation("/diagnostics")}
-              variant="outline"
-              className="h-9 rounded-xl border-white/10 bg-white/5 text-xs font-bold text-neutral-300 hover:text-white hover:bg-white/10"
-              title="System Diagnostics"
-            >
-              <Activity size={14} className="mr-1.5 text-[#d6ff3f]" />
-              <span className="hidden sm:inline">Diagnostics</span>
-            </Button>
+          <div className="flex items-center gap-2">
             <Button
               onClick={() => setJoinOpen(true)}
               variant="outline"
-              className="h-9 rounded-xl border-white/10 bg-white/5 text-xs font-bold text-white hover:bg-white/10"
+              size="sm"
+              className="h-8 rounded-lg border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10"
             >
               Join with Code
             </Button>
             <Button
               onClick={() => setCreateOpen(true)}
-              className="h-9 rounded-xl bg-[#d6ff3f] px-4 text-xs font-extrabold text-black hover:bg-[#e1ff70]"
+              size="sm"
+              className="h-8 rounded-lg bg-[#d6ff3f] px-3.5 text-xs font-extrabold text-black hover:bg-[#e1ff70]"
             >
-              <Plus size={15} className="mr-1.5" /> Create Party
+              <Plus size={15} className="mr-1" /> Create Party
             </Button>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Main Content */}
       <main className="relative z-10 mx-auto max-w-7xl px-6 py-8">
@@ -334,93 +350,152 @@ export default function Dashboard() {
                 })}
               </div>
             )}
+
+            {/* Concluded Watch Party History Section */}
+            <div className="mt-10 pt-8 border-t border-white/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <HistoryIcon size={20} className="text-[#d6ff3f]" />
+                    Watch Party History
+                  </h2>
+                  <p className="mt-1 text-xs text-neutral-400">
+                    Concluded party sessions. Re-launch anytime with the original video link.
+                  </p>
+                </div>
+                <Link
+                  href="/history"
+                  className="text-xs font-semibold text-[#d6ff3f] hover:underline flex items-center gap-1"
+                >
+                  <span>View Full History</span>
+                  <ExternalLink size={13} />
+                </Link>
+              </div>
+
+              {loadingHistory ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {[1, 2].map((n) => (
+                    <div key={n} className="h-24 rounded-2xl border border-white/5 bg-white/[.02] animate-pulse" />
+                  ))}
+                </div>
+              ) : historyRooms && historyRooms.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {historyRooms.slice(0, 4).map((room) => (
+                    <div
+                      key={room.id}
+                      className="rounded-2xl border border-white/10 bg-[#12151f]/60 p-4 flex items-center justify-between hover:border-white/20 transition"
+                    >
+                      <div className="space-y-1 min-w-0 pr-3">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/15 border border-red-500/20 text-red-400">
+                            ENDED
+                          </span>
+                          <span className="text-[10px] font-bold uppercase text-zinc-400">
+                            {room.platform}
+                          </span>
+                        </div>
+                        <h4 className="font-bold text-sm text-white truncate">{room.title}</h4>
+                        <p className="text-[10px] text-zinc-400 font-mono">
+                          Code: {room.code}
+                          {room.endedAt && (
+                            <span> • {new Date(room.endedAt).toLocaleDateString()}</span>
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Link href={`/party/${room.code}`}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 border-white/15 text-xs text-zinc-300 hover:text-white"
+                          >
+                            Recap
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-white/5 bg-white/[0.01] p-6 text-center text-xs text-zinc-500">
+                  No concluded parties recorded yet. When a host ends a room, it appears here.
+                </div>
+              )}
+            </div>
           </section>
 
           {/* User Profile & Quick Settings Sidebar */}
           <aside className="space-y-6">
-            <div className="rounded-2xl border border-white/[.08] bg-[#11141c] p-5">
+            <div className="rounded-2xl border border-white/[.08] bg-[#11141c] p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div
-                  className="flex h-12 w-12 items-center justify-center rounded-2xl text-base font-extrabold text-black shadow-lg"
-                  style={{ backgroundColor: avatarColor }}
-                >
-                  {(user?.name || profileName || "You").substring(0, 2).toUpperCase()}
-                </div>
+                {user?.avatarUrl ? (
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.name || "User"}
+                    className="h-12 w-12 rounded-2xl object-cover ring-2 ring-[#d6ff3f]/50 shadow-lg"
+                  />
+                ) : (
+                  <div
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl text-base font-extrabold text-black shadow-lg"
+                    style={{ backgroundColor: avatarColor }}
+                  >
+                    {(user?.name || profileName || "You").substring(0, 2).toUpperCase()}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-sm font-extrabold text-white">
-                    {user?.name || profileName || "Guest User"}
-                  </h3>
-                  <p className="text-[10px] text-neutral-400">
-                    {isAuthenticated ? "Authenticated Account" : "Guest Profile"}
-                  </p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h3 className="truncate text-sm font-extrabold text-white">
+                      {user?.name || profileName || "Guest User"}
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    {user?.loginMethod === "google" || Boolean(user?.googleId) ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#4285F4]/20 text-[#8ab4f8] text-[10px] font-semibold">
+                        <ShieldCheck size={11} /> Google Account
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-neutral-400">
+                        Guest Session
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {isEditingProfile ? (
-                <div className="mt-4 space-y-3 border-t border-white/5 pt-3">
-                  <div>
-                    <label className="text-[10px] font-bold uppercase text-neutral-400">
-                      Display Name
-                    </label>
-                    <Input
-                      value={profileName}
-                      onChange={(e) => setProfileName(e.target.value)}
-                      placeholder="Enter your name"
-                      className="mt-1 h-9 border-white/10 bg-black/40 text-xs text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold uppercase text-neutral-400">
-                      Avatar Color
-                    </label>
-                    <div className="mt-1.5 flex gap-1.5">
-                      {["#D6FF3F", "#FF6B6B", "#8EABE9", "#C47BDE", "#4ECCA3", "#FFA62B"].map(
-                        (col) => (
-                          <button
-                            key={col}
-                            onClick={() => setAvatarColor(col)}
-                            className={`h-6 w-6 rounded-full border-2 transition ${
-                              avatarColor === col ? "border-white scale-110" : "border-transparent"
-                            }`}
-                            style={{ backgroundColor: col }}
-                          />
-                        )
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-1">
-                    <Button
-                      onClick={handleSaveProfile}
-                      className="h-8 flex-1 rounded-lg bg-[#d6ff3f] text-[10px] font-bold text-black hover:bg-[#e1ff70]"
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      onClick={() => setIsEditingProfile(false)}
-                      variant="outline"
-                      className="h-8 rounded-lg border-white/10 text-[10px] text-neutral-400"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
+              {/* Stats Counters */}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-center">
+                <div className="rounded-xl bg-white/[0.02] p-2">
+                  <span className="text-[10px] uppercase font-bold text-neutral-400">Hosted</span>
+                  <p className="text-base font-extrabold text-white">{userStats?.hostedCount ?? 0}</p>
                 </div>
-              ) : (
-                <div className="mt-4 border-t border-white/5 pt-3">
+                <div className="rounded-xl bg-white/[0.02] p-2">
+                  <span className="text-[10px] uppercase font-bold text-neutral-400">Joined</span>
+                  <p className="text-base font-extrabold text-white">{userStats?.joinedCount ?? 0}</p>
+                </div>
+              </div>
+
+              <div className="pt-1 space-y-2">
+                <Link href="/profile" className="block">
                   <Button
-                    onClick={() => {
-                      setProfileName(user?.name || "");
-                      setAvatarColor(user?.avatarColor || "#D6FF3F");
-                      setIsEditingProfile(true);
-                    }}
                     variant="outline"
-                    className="h-8 w-full rounded-lg border-white/10 bg-white/[.02] text-[11px] font-semibold text-neutral-300 hover:bg-white/[.05]"
+                    className="h-9 w-full rounded-xl border-white/10 bg-white/[0.04] text-xs font-semibold text-white hover:bg-white/[0.08]"
                   >
-                    Edit Profile
+                    Manage Profile & Stats
                   </Button>
-                </div>
-              )}
+                </Link>
+
+                {!isAuthenticated && (
+                  <Link href="/login" className="block">
+                    <Button
+                      size="sm"
+                      className="h-9 w-full rounded-xl bg-[#d6ff3f] text-[#0a0d14] font-bold text-xs hover:bg-[#c2ea32]"
+                    >
+                      Sign in with Google
+                    </Button>
+                  </Link>
+                )}
+              </div>
             </div>
 
             {/* Platform Capabilities Overview */}
