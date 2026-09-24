@@ -198,11 +198,21 @@ class MemoryStore {
     return room;
   }
 
-  listActiveRooms(): Room[] {
+  listActiveRooms(userId?: number): (Room & { userJoinedBefore?: boolean })[] {
     return Array.from(this.rooms.values())
       .filter(r => r.status === "active" && (r.settings?.isPublic !== false))
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
-      .slice(0, 30);
+      .slice(0, 30)
+      .map(r => {
+        const userJoinedBefore = Boolean(
+          userId &&
+            (r.hostId === userId ||
+              Array.from(this.members.values()).some(
+                m => m.roomId === r.id && m.userId === userId
+              ))
+        );
+        return { ...r, userJoinedBefore };
+      });
   }
 
   listHistoryRooms(userId?: number): Room[] {
@@ -583,10 +593,12 @@ export async function endRoom(roomId: number): Promise<Room | undefined> {
   }
 }
 
-export async function listActiveRooms(): Promise<Room[]> {
+export async function listActiveRooms(
+  userId?: number
+): Promise<(Room & { userJoinedBefore?: boolean })[]> {
   const db = await getDb();
   if (!db) {
-    return memoryStore.listActiveRooms();
+    return memoryStore.listActiveRooms(userId);
   }
 
   try {
@@ -596,9 +608,24 @@ export async function listActiveRooms(): Promise<Room[]> {
       .where(eq(rooms.status, "active"))
       .orderBy(desc(rooms.updatedAt))
       .limit(30);
-    return result.length > 0 ? result : memoryStore.listActiveRooms();
+
+    const baseRooms = result.length > 0 ? result : memoryStore.listActiveRooms(userId);
+    if (!userId) {
+      return baseRooms.map((r) => ({ ...r, userJoinedBefore: false }));
+    }
+
+    const memberships = await db
+      .select({ roomId: roomMembers.roomId })
+      .from(roomMembers)
+      .where(eq(roomMembers.userId, userId));
+    const memberRoomIds = new Set(memberships.map((m) => m.roomId));
+
+    return baseRooms.map((r) => ({
+      ...r,
+      userJoinedBefore: r.hostId === userId || memberRoomIds.has(r.id),
+    }));
   } catch (error) {
-    return memoryStore.listActiveRooms();
+    return memoryStore.listActiveRooms(userId);
   }
 }
 

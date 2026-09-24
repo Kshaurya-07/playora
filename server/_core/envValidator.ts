@@ -11,6 +11,13 @@ export interface SystemDiagnosticsReport {
     encryptionConfigured: boolean;
     websocketConfigured: boolean;
   };
+  googleAuth: {
+    clientConfigured: boolean;
+    secretConfigured: boolean;
+    tokenVerificationReady: boolean;
+    sessionCreatedReady: boolean;
+    clientIdPreview?: string;
+  };
   streaming: {
     urlParserWorking: boolean;
     platformDetectorWorking: boolean;
@@ -64,6 +71,12 @@ export async function getSystemDiagnostics(): Promise<SystemDiagnosticsReport> {
   const isDbConnected = Boolean(process.env.DATABASE_URL);
   const activeRooms = await db.listActiveRooms();
 
+  const hasGoogleClient = Boolean(ENV.googleClientId && ENV.googleClientId.trim().length > 0);
+  const hasGoogleSecret = Boolean(ENV.googleClientSecret && ENV.googleClientSecret.trim().length > 0);
+  const clientIdPreview = hasGoogleClient
+    ? ENV.googleClientId.slice(0, 12) + "..." + ENV.googleClientId.slice(-14)
+    : undefined;
+
   return {
     environment: {
       nodeEnv: process.env.NODE_ENV || "development",
@@ -73,6 +86,13 @@ export async function getSystemDiagnostics(): Promise<SystemDiagnosticsReport> {
       authenticationConfigured: Boolean(ENV.cookieSecret && ENV.cookieSecret.length >= 16),
       encryptionConfigured: Boolean(ENV.cookieSecret && ENV.cookieSecret.length >= 32),
       websocketConfigured: true,
+    },
+    googleAuth: {
+      clientConfigured: hasGoogleClient,
+      secretConfigured: hasGoogleSecret,
+      tokenVerificationReady: true,
+      sessionCreatedReady: Boolean(ENV.cookieSecret && ENV.cookieSecret.length >= 16),
+      clientIdPreview,
     },
     streaming: {
       urlParserWorking: true,

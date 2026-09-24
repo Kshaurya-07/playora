@@ -13,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { CreatePartyModal } from "@/components/CreatePartyModal";
+import { JoinPartyModal } from "@/components/JoinPartyModal";
 import {
   Plus,
   ArrowRight,
@@ -33,6 +35,7 @@ import {
   Activity,
   History as HistoryIcon,
   ShieldCheck,
+  RotateCcw,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -304,17 +307,24 @@ export default function Dashboard() {
                     >
                       <div>
                         <div className="flex items-center justify-between">
-                          <span
-                            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-bold"
-                            style={{
-                              backgroundColor: `${meta.brandColor}18`,
-                              color: meta.brandColor,
-                              border: `1px solid ${meta.brandColor}33`,
-                            }}
-                          >
-                            {getPlatformIcon(room.platform)}
-                            {meta.name}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {room.userJoinedBefore && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-[#d6ff3f]/15 border border-[#d6ff3f]/30 px-2 py-0.5 text-[9px] font-bold text-[#d6ff3f]">
+                                <RotateCcw size={10} /> Rejoin
+                              </span>
+                            )}
+                            <span
+                              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-bold"
+                              style={{
+                                backgroundColor: `${meta.brandColor}18`,
+                                color: meta.brandColor,
+                                border: `1px solid ${meta.brandColor}33`,
+                              }}
+                            >
+                              {getPlatformIcon(room.platform)}
+                              {meta.name}
+                            </span>
+                          </div>
                           <span className="font-mono text-xs font-bold text-neutral-400">
                             {room.code}
                           </span>
@@ -340,9 +350,14 @@ export default function Dashboard() {
 
                         <Button
                           onClick={() => setLocation(`/party/${room.code}`)}
-                          className="h-8 rounded-lg bg-[#d6ff3f] px-3 text-[10px] font-extrabold text-black hover:bg-[#e1ff70]"
+                          className={`h-8 rounded-lg px-3 text-[10px] font-extrabold ${
+                            room.userJoinedBefore
+                              ? "bg-[#d6ff3f] text-black hover:bg-[#e1ff70] shadow-md shadow-[#d6ff3f]/25 ring-1 ring-[#d6ff3f]"
+                              : "bg-white/10 text-white hover:bg-[#d6ff3f] hover:text-black"
+                          }`}
                         >
-                          Join Party <ArrowRight size={12} className="ml-1" />
+                          {room.userJoinedBefore ? "Rejoin Party" : "Join Party"}{" "}
+                          <ArrowRight size={12} className="ml-1" />
                         </Button>
                       </div>
                     </div>
@@ -540,180 +555,18 @@ export default function Dashboard() {
       </main>
 
       {/* Create Room Modal */}
-      {createOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
-          <div className="glass w-full max-w-lg rounded-3xl border border-white/[.12] p-6 shadow-2xl">
-            <h2 className="text-xl font-extrabold text-white">Create a Watch Party</h2>
-            <p className="mt-1 text-xs text-neutral-400">
-              Configure your room and share what you’ll be watching together.
-            </p>
-
-            {/* Quick Templates */}
-            <div className="mt-4">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
-                Quick Party Templates
-              </label>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {templates.map((tpl) => (
-                  <button
-                    key={tpl.label}
-                    type="button"
-                    onClick={() => {
-                      setPartyTitle(tpl.title);
-                      setContentUrl(tpl.url);
-                      setSelectedPlatform(tpl.platform);
-                    }}
-                    className="btn-press rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-neutral-300 hover:border-[#d6ff3f]/40 hover:bg-[#d6ff3f]/10 hover:text-white transition"
-                  >
-                    {tpl.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
-                  Party Name
-                </label>
-                <Input
-                  value={partyTitle}
-                  onChange={(e) => setPartyTitle(e.target.value)}
-                  placeholder="e.g. Friday Movie Night"
-                  className="mt-1.5 h-11 border-white/10 bg-black/40 text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
-                  Select Platform
-                </label>
-                <div className="mt-1.5 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                  {PLATFORM_LIST.map((plat) => {
-                    const isSelected = selectedPlatform === plat.id;
-                    return (
-                      <button
-                        key={plat.id}
-                        type="button"
-                        onClick={() => handlePlatformSelect(plat.id)}
-                        className={`btn-press flex flex-col items-center justify-center rounded-xl border p-2 text-center transition ${
-                          isSelected
-                            ? "border-[#d6ff3f] bg-[#d6ff3f]/10 text-white"
-                            : "border-white/5 bg-white/[.02] text-neutral-400 hover:border-white/10"
-                        }`}
-                      >
-                        <span className="text-[11px] font-bold">{plat.name}</span>
-                        <span
-                          className={`mt-0.5 text-[8px] font-semibold ${
-                            plat.capabilities.syncCapability === "automatic"
-                              ? "text-[#d6ff3f]"
-                              : "text-amber-400"
-                          }`}
-                        >
-                          {plat.capabilities.syncCapability === "automatic" ? "Auto Sync" : "Assisted"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
-                  Content URL
-                </label>
-                <Input
-                  value={contentUrl}
-                  onChange={(e) => handleContentUrlChange(e.target.value)}
-                  placeholder="Paste YouTube, Twitch, Vimeo, MP4, Netflix, Prime, etc."
-                  className="mt-1.5 h-11 border-white/10 bg-black/40 text-xs text-white font-mono"
-                />
-                {resolvedPreview && resolvedPreview.platform !== "generic" && (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-[#d6ff3f]/20 bg-[#d6ff3f]/5 px-3 py-1.5 text-[11px] text-neutral-300">
-                    <Sparkles size={12} className="text-[#d6ff3f] shrink-0" />
-                    <span>Detected:</span>
-                    <strong className="text-white">{resolvedPreview.platformName}</strong>
-                    <span className="text-neutral-500">•</span>
-                    <span className="rounded bg-white/10 px-1.5 py-0.2 text-[9px] font-bold text-[#d6ff3f]">
-                      {resolvedPreview.capabilities.syncCapability === "automatic" ? "Auto-Sync" : "Companion Sync"}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[.02] p-3">
-                <div>
-                  <span className="text-xs font-bold text-white">Host-Only Playback Control</span>
-                  <p className="text-[10px] text-neutral-400">
-                    Only you can play, pause, or seek the video
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={hostOnlyControls}
-                  onChange={(e) => setHostOnlyControls(e.target.checked)}
-                  className="h-4 w-4 accent-[#d6ff3f] cursor-pointer"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2 border-t border-white/10 pt-4">
-              <Button
-                onClick={() => setCreateOpen(false)}
-                variant="outline"
-                className="h-10 rounded-xl border-white/10 text-xs font-bold text-neutral-300"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreateParty}
-                disabled={createPartyMutation.isPending}
-                className="h-10 rounded-xl bg-[#d6ff3f] px-5 text-xs font-extrabold text-black hover:bg-[#e1ff70]"
-              >
-                {createPartyMutation.isPending ? "Creating..." : "Launch Party"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CreatePartyModal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        initialUrl={contentUrl}
+        initialTitle={partyTitle}
+      />
 
       {/* Join Room Modal */}
-      {joinOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
-          <div className="glass w-full max-w-md rounded-3xl border border-white/[.12] p-6 shadow-2xl">
-            <h2 className="text-xl font-extrabold text-white">Join a Watch Party</h2>
-            <p className="mt-1 text-xs text-neutral-400">
-              Paste the invite code or complete PlayOra link from your friend.
-            </p>
-
-            <div className="mt-5">
-              <Input
-                autoFocus
-                value={joinCodeInput}
-                onChange={(e) => setJoinCodeInput(e.target.value)}
-                placeholder="e.g. 7K4MZ2P9 or playora.app/party/..."
-                className="h-12 border-white/10 bg-black/40 text-center font-mono text-base uppercase tracking-widest text-white"
-              />
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2 border-t border-white/10 pt-4">
-              <Button
-                onClick={() => setJoinOpen(false)}
-                variant="outline"
-                className="h-10 rounded-xl border-white/10 text-xs font-bold text-neutral-300"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleJoinParty}
-                className="h-10 rounded-xl bg-[#d6ff3f] px-5 text-xs font-extrabold text-black hover:bg-[#e1ff70]"
-              >
-                Join Party <ArrowRight size={14} className="ml-1.5" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <JoinPartyModal
+        isOpen={joinOpen}
+        onClose={() => setJoinOpen(false)}
+      />
     </div>
   );
 }

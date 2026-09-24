@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import { initWebSocketServer } from "./socket";
 import * as db from "./db";
 import { appRouter } from "./routers";
+import { getSystemDiagnostics } from "./_core/envValidator";
 
 describe("PlayOra Account System & Party Lifecycle Architecture", () => {
   let server: HttpServer;
@@ -213,5 +214,58 @@ describe("PlayOra Account System & Party Lifecycle Architecture", () => {
     hostWs.close();
     participantWs.close();
     newWs.close();
+  });
+
+  it("identifies userJoinedBefore for active rooms to power the Rejoin feature", async () => {
+    const testUser = await db.upsertUser({
+      openId: "rejoin_user_1",
+      name: "Rejoin Member",
+    });
+
+    const strangerUser = await db.upsertUser({
+      openId: "stranger_user_1",
+      name: "Stranger Member",
+    });
+
+    const activeRoom = await db.createRoom({
+      code: "REJOIN01",
+      title: "Rejoin Test Party",
+      platform: "youtube",
+      contentUrl: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+      hostId: 99999,
+      status: "active",
+      isPlaying: true,
+      currentPosition: 120,
+    });
+
+    // Record testUser as member of activeRoom
+    await db.recordMemberJoin(activeRoom.id, testUser.id, "participant");
+
+    // Query active rooms for testUser
+    const testUserRooms = await db.listActiveRooms(testUser.id);
+    const targetRoomForTestUser = testUserRooms.find((r) => r.code === "REJOIN01");
+    expect(targetRoomForTestUser).toBeDefined();
+    expect(targetRoomForTestUser?.userJoinedBefore).toBe(true);
+
+    // Query active rooms for strangerUser
+    const strangerRooms = await db.listActiveRooms(strangerUser.id);
+    const targetRoomForStranger = strangerRooms.find((r) => r.code === "REJOIN01");
+    expect(targetRoomForStranger).toBeDefined();
+    expect(targetRoomForStranger?.userJoinedBefore).toBe(false);
+
+    // Query active rooms with no user (guest)
+    const guestRooms = await db.listActiveRooms(undefined);
+    const targetRoomForGuest = guestRooms.find((r) => r.code === "REJOIN01");
+    expect(targetRoomForGuest).toBeDefined();
+    expect(targetRoomForGuest?.userJoinedBefore).toBe(false);
+  });
+
+  it("provides comprehensive Google Identity Services diagnostics", async () => {
+    const diag = await getSystemDiagnostics();
+    expect(diag.googleAuth).toBeDefined();
+    expect(typeof diag.googleAuth.clientConfigured).toBe("boolean");
+    expect(typeof diag.googleAuth.secretConfigured).toBe("boolean");
+    expect(diag.googleAuth.tokenVerificationReady).toBe(true);
+    expect(typeof diag.googleAuth.sessionCreatedReady).toBe("boolean");
   });
 });

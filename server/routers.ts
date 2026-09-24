@@ -282,12 +282,12 @@ export const appRouter = router({
         return room;
       }),
 
-    list: publicProcedure.query(async () => {
-      return db.listActiveRooms();
+    list: publicProcedure.query(async ({ ctx }) => {
+      return db.listActiveRooms(ctx.user?.id);
     }),
 
-    listActive: publicProcedure.query(async () => {
-      return db.listActiveRooms();
+    listActive: publicProcedure.query(async ({ ctx }) => {
+      return db.listActiveRooms(ctx.user?.id);
     }),
 
     listHistory: publicProcedure

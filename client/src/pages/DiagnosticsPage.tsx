@@ -12,6 +12,7 @@ import {
   Layers,
   Radio,
   Tv,
+  ShieldCheck,
 } from "lucide-react";
 
 export default function DiagnosticsPage() {
@@ -150,7 +151,50 @@ export default function DiagnosticsPage() {
               </div>
             </div>
 
-            {/* 2. Streaming Adapters Section */}
+            {/* 2. Google Identity Services Section */}
+            <div className="rounded-2xl border border-white/[.08] bg-[#11141c] p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck size={16} className="text-[#4285F4]" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                  Google Identity Services & OAuth
+                </h3>
+              </div>
+
+              <div className="space-y-1">
+                {renderStatus(
+                  diag.googleAuth?.clientConfigured ?? false,
+                  diag.googleAuth?.clientIdPreview
+                    ? `Google Client ID configured (${diag.googleAuth.clientIdPreview})`
+                    : "Google Client ID configured",
+                  "Google Client ID missing (VITE_GOOGLE_CLIENT_ID / GOOGLE_CLIENT_ID)"
+                )}
+                {renderStatus(
+                  diag.googleAuth?.secretConfigured ?? false,
+                  "Google Client Secret configured (Backend verification ready)",
+                  "Google Client Secret not set (Optional for client-side GSI verification)"
+                )}
+                {renderStatus(
+                  typeof window !== "undefined" &&
+                    (window.location.protocol === "https:" ||
+                      window.location.hostname === "localhost" ||
+                      window.location.hostname === "127.0.0.1"),
+                  `Secure Origin verified (${typeof window !== "undefined" ? window.location.origin : "https"})`,
+                  "Insecure HTTP origin (Google Identity Services requires HTTPS or localhost)"
+                )}
+                {renderStatus(
+                  diag.googleAuth?.tokenVerificationReady ?? true,
+                  "Google Token verification engine ready (OpenID Connect / sub verify)",
+                  "Token verification unready"
+                )}
+                {renderStatus(
+                  diag.googleAuth?.sessionCreatedReady ?? false,
+                  "Persistent session creation ready (Cookie auth & multi-device sync)",
+                  "Session creation requires encryption key"
+                )}
+              </div>
+            </div>
+
+            {/* 3. Streaming Engine Section */}
             <div className="rounded-2xl border border-white/[.08] bg-[#11141c] p-5">
               <div className="flex items-center gap-2 mb-3">
                 <Radio size={16} className="text-purple-400" />
@@ -178,7 +222,7 @@ export default function DiagnosticsPage() {
               </div>
             </div>
 
-            {/* 3. Room & State Engine Section */}
+            {/* 4. Room & State Engine Section */}
             <div className="rounded-2xl border border-white/[.08] bg-[#11141c] p-5">
               <div className="flex items-center gap-2 mb-3">
                 <Layers size={16} className="text-amber-400" />

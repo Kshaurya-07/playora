@@ -14,6 +14,8 @@ import {
   X,
   Sparkles,
   Activity,
+  Users,
+  Settings,
 } from "lucide-react";
 
 export function Navbar() {
@@ -76,6 +78,30 @@ export function Navbar() {
             >
               <History size={16} />
               <span>History</span>
+            </Link>
+
+            <Link
+              href="/friends"
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                location === "/friends"
+                  ? "bg-white/10 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Users size={16} />
+              <span>Friends</span>
+            </Link>
+
+            <Link
+              href="/settings"
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                location === "/settings"
+                  ? "bg-white/10 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Settings size={16} />
+              <span>Settings</span>
             </Link>
           </nav>
         </div>
@@ -203,6 +229,28 @@ export function Navbar() {
           >
             <History size={18} />
             <span>Watch Party History</span>
+          </Link>
+
+          <Link
+            href="/friends"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${
+              location === "/friends" ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Users size={18} />
+            <span>Friends & Co-Watchers</span>
+          </Link>
+
+          <Link
+            href="/settings"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${
+              location === "/settings" ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Settings size={18} />
+            <span>Settings</span>
           </Link>
 
           <Link

@@ -16,6 +16,7 @@ import {
   Film,
   Flame,
   ExternalLink,
+  RotateCcw,
 } from "lucide-react";
 
 export default function ActivePartiesPage() {
@@ -70,7 +71,7 @@ export default function ActivePartiesPage() {
             </p>
           </div>
 
-          <Link href="/dashboard">
+          <Link href="/party/create">
             <Button className="bg-[#d6ff3f] hover:bg-[#c2ea32] text-[#0a0d14] font-bold shadow-lg shadow-[#d6ff3f]/10">
               <Plus size={18} className="mr-1.5" />
               <span>Create New Party</span>
@@ -126,10 +127,19 @@ export default function ActivePartiesPage() {
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold tracking-wide uppercase">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      ACTIVE
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {room.userJoinedBefore ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#d6ff3f]/15 border border-[#d6ff3f]/30 text-[#d6ff3f] text-[11px] font-bold">
+                          <RotateCcw size={10} />
+                          REJOIN
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold tracking-wide uppercase">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          ACTIVE
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs uppercase font-extrabold px-2 py-0.5 rounded bg-white/10 text-zinc-300 tracking-wider">
                       {room.platform}
                     </span>
@@ -153,9 +163,13 @@ export default function ActivePartiesPage() {
                   <Link href={`/party/${room.code}`}>
                     <Button
                       size="sm"
-                      className="bg-white/10 hover:bg-[#d6ff3f] hover:text-[#0a0d14] text-white font-semibold transition text-xs h-8"
+                      className={`transition text-xs h-8 ${
+                        room.userJoinedBefore
+                          ? "bg-[#d6ff3f] text-[#0a0d14] font-extrabold hover:bg-[#e1ff70] shadow-md shadow-[#d6ff3f]/25 ring-1 ring-[#d6ff3f]"
+                          : "bg-white/10 hover:bg-[#d6ff3f] hover:text-[#0a0d14] text-white font-semibold"
+                      }`}
                     >
-                      <span>Join Party</span>
+                      <span>{room.userJoinedBefore ? "Rejoin Party" : "Join Party"}</span>
                       <ArrowRight size={14} className="ml-1" />
                     </Button>
                   </Link>

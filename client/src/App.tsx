@@ -12,6 +12,9 @@ import LoginPage from "./pages/LoginPage";
 import ProfilePage from "./pages/ProfilePage";
 import ActivePartiesPage from "./pages/ActivePartiesPage";
 import HistoryPage from "./pages/HistoryPage";
+import CreatePartyPage from "./pages/CreatePartyPage";
+import FriendsPage from "./pages/FriendsPage";
+import SettingsPage from "./pages/SettingsPage";
 import { MobileBottomNav } from "./components/MobileBottomNav";
 
 function PartyRoute() {
@@ -28,7 +31,10 @@ function Router() {
       <Route path="/profile" component={ProfilePage} />
       <Route path="/parties" component={ActivePartiesPage} />
       <Route path="/history" component={HistoryPage} />
+      <Route path="/friends" component={FriendsPage} />
+      <Route path="/settings" component={SettingsPage} />
       <Route path="/diagnostics" component={DiagnosticsPage} />
+      <Route path="/party/create" component={CreatePartyPage} />
       <Route path="/party/:code" component={PartyRoute} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
