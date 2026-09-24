@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -45,6 +45,9 @@ import {
   ListVideo,
   Crown,
   Sparkles,
+  PhoneOff,
+  LogOut,
+  Radio,
 } from "lucide-react";
 
 interface WatchRoomPageProps {
@@ -97,9 +100,12 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     [user, cleanCode]
   );
 
+  const voiceChatRef = useRef<any>(null);
+
   // WebSocket real-time connection
   const {
     connected,
+    connectionStatus,
     peerId,
     role,
     members,
@@ -119,6 +125,8 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     deleteChatMessage,
     sendReaction,
     triggerCountdown,
+    joinVoiceChannel,
+    leaveVoiceChannel,
     updateVoiceState,
     sendVoiceSignal,
     changeContent,
@@ -126,29 +134,30 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     transferHost,
     kickPeer,
     updateSettings,
+    leaveRoom,
   } = useRoomSocket({
     roomCode: cleanCode,
     user: socketUser,
     platform: room?.platform,
     contentUrl: room?.contentUrl,
-    onPlaybackSync: (state) => {
+    onPlaybackSync: useCallback((state: any) => {
       setTargetSeekPos(state.position);
-    },
-    onVoiceSignal: (senderPeerId, senderName, signal) => {
-      voiceChat.handleVoiceSignal(senderPeerId, senderName, signal);
-    },
-    onCountdownTick: (count, message) => {
+    }, []),
+    onVoiceSignal: useCallback((senderPeerId: string, senderName: string, signal: any) => {
+      voiceChatRef.current?.handleVoiceSignal(senderPeerId, senderName, signal);
+    }, []),
+    onCountdownTick: useCallback((count: number, message: string) => {
       setCountdownState({ count, message });
-    },
-    onContentChanged: (newContent) => {
+    }, []),
+    onContentChanged: useCallback((newContent: any) => {
       setTargetSeekPos(0);
       setLocalPlayerPos(0);
       toast.info(`Stream switched to ${newContent.title}`);
-    },
-    onKicked: (msg) => {
+    }, []),
+    onKicked: useCallback((msg: string) => {
       toast.error(msg);
       setLocation("/dashboard");
-    },
+    }, [setLocation]),
   });
 
   // Voice Chat Hook
@@ -156,10 +165,20 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     myPeerId: peerId,
     activeMembers: members,
     sendSignal: sendVoiceSignal,
-    onSpeakingChange: (isSpeaking) => {
-      updateVoiceState(voiceChat.muted, isSpeaking);
-    },
+    joinVoiceChannel,
+    leaveVoiceChannel,
+    onSpeakingChange: useCallback((isSpeaking: boolean) => {
+      updateVoiceState(voiceChatRef.current?.muted ?? false, isSpeaking);
+    }, [updateVoiceState]),
   });
+  voiceChatRef.current = voiceChat;
+
+  // Authoritative Leave Room (Requirement 21)
+  const handleLeaveRoom = useCallback(() => {
+    voiceChat.leaveVoice();
+    leaveRoom();
+    setLocation("/dashboard");
+  }, [voiceChat, leaveRoom, setLocation]);
 
   const isHost = role === "host" || room?.hostId === socketUser.id;
   const canControl = isHost || !roomSettings?.hostOnlyControls;
@@ -445,7 +464,7 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       <header className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-white/[.08] bg-[#0c0e15]/90 px-4 backdrop-blur-xl lg:px-6">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setLocation("/dashboard")}
+            onClick={handleLeaveRoom}
             className="btn-press flex items-center gap-1.5 text-xs font-bold text-neutral-400 hover:text-white"
           >
             <ChevronLeft size={16} />
@@ -523,29 +542,78 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
             </Button>
           )}
 
-          {/* Voice Chat Mic Toggle */}
-          <Button
-            onClick={voiceChat.toggleMute}
-            variant="outline"
-            size="sm"
-            className={`h-8 rounded-lg border px-2.5 text-xs font-bold transition ${
-              voiceChat.muted
-                ? "border-white/10 bg-white/5 text-neutral-400 hover:bg-white/10"
-                : "border-emerald-500/40 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 animate-pulse"
-            }`}
-          >
-            {voiceChat.muted ? (
-              <>
-                <MicOff size={13} className="mr-1 sm:mr-1.5 text-red-400" />
-                <span className="hidden sm:inline">Muted</span>
-              </>
-            ) : (
-              <>
-                <Mic size={13} className="mr-1 sm:mr-1.5 text-emerald-400" />
-                <span className="hidden sm:inline">Voice Live</span>
-              </>
-            )}
-          </Button>
+          {/* Voice Chat Controls (Requirement 17) */}
+          {voiceChat.voiceState === "disconnected" && (
+            <Button
+              onClick={voiceChat.joinVoice}
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg border-emerald-500/30 bg-emerald-500/10 px-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50"
+              title="Join Voice Chat"
+            >
+              <Mic size={13} className="mr-1 sm:mr-1.5" />
+              <span className="hidden sm:inline">Join Voice</span>
+            </Button>
+          )}
+
+          {voiceChat.voiceState === "connecting" && (
+            <Button
+              disabled
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg border-emerald-500/30 bg-emerald-500/10 px-2.5 text-xs font-bold text-emerald-400"
+            >
+              <Waves size={13} className="mr-1 sm:mr-1.5 animate-spin" />
+              <span className="hidden sm:inline">Connecting...</span>
+            </Button>
+          )}
+
+          {voiceChat.voiceState === "connected" && (
+            <div className="flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 p-0.5">
+              <Button
+                onClick={voiceChat.toggleMute}
+                size="sm"
+                variant="ghost"
+                className={`h-7 px-2 text-xs font-bold ${
+                  voiceChat.muted ? "text-amber-400 hover:text-amber-300" : "text-emerald-400 hover:text-emerald-300"
+                }`}
+                title={voiceChat.muted ? "Unmute microphone" : "Mute microphone"}
+              >
+                {voiceChat.muted ? (
+                  <>
+                    <MicOff size={13} className="mr-1 text-amber-400" />
+                    <span className="hidden sm:inline">Muted</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic size={13} className="mr-1 text-emerald-400 animate-pulse" />
+                    <span className="hidden sm:inline">Voice Live</span>
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={() => voiceChat.leaveVoice()}
+                size="sm"
+                variant="ghost"
+                className="h-7 px-1.5 text-xs text-neutral-400 hover:text-red-400 hover:bg-red-500/20"
+                title="Leave Voice"
+              >
+                <PhoneOff size={12} />
+              </Button>
+            </div>
+          )}
+
+          {voiceChat.voiceState === "reconnecting" && (
+            <Button
+              disabled
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg border-amber-500/40 bg-amber-500/10 px-2.5 text-xs font-bold text-amber-300 animate-pulse"
+            >
+              <Waves size={13} className="mr-1 sm:mr-1.5 animate-pulse" />
+              <span className="hidden sm:inline">Reconnecting...</span>
+            </Button>
+          )}
 
           {/* Invite Button */}
           <Button
@@ -557,8 +625,28 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
             <Share2 size={13} className="mr-1.5" />
             <span className="hidden sm:inline">Invite</span>
           </Button>
+
+          {/* Leave Party Button (Requirement 21) */}
+          <Button
+            onClick={handleLeaveRoom}
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg border-red-500/20 bg-red-500/5 px-2 text-xs font-bold text-red-400 hover:bg-red-500/10 hover:border-red-500/40"
+            title="Leave Watch Party"
+          >
+            <LogOut size={13} className="sm:mr-1.5" />
+            <span className="hidden sm:inline">Leave</span>
+          </Button>
         </div>
       </header>
+
+      {/* Reconnecting Banner (Requirement 9 & 26) */}
+      {connectionStatus === "reconnecting" && (
+        <div className="relative z-20 flex items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 py-1.5 text-xs font-semibold text-amber-300">
+          <Waves size={13} className="animate-pulse" />
+          <span>Reconnecting to watch party... Your session and sync will resume automatically.</span>
+        </div>
+      )}
 
       {/* Main Room Split View: Video Surface on Left, Social Panel on Right */}
       <main className="relative z-10 mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[1fr_360px] lg:p-4 min-h-0">
@@ -733,6 +821,36 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
               >
                 <Copy size={14} className="mr-1.5" />
                 Copy Party Link
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Microphone Permission Modal (Requirement 16) */}
+      {voiceChat.permissionError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-amber-500/30 bg-[#161a24] p-5 shadow-2xl">
+            <div className="flex items-center gap-2 text-amber-400">
+              <AlertCircle size={20} />
+              <h3 className="text-sm font-bold text-white">Microphone Permission Required</h3>
+            </div>
+            <p className="mt-2 text-xs text-neutral-300">
+              Browser microphone access is required to speak in voice chat. Watch party, video synchronization, and text chat will continue normally without voice.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <Button
+                onClick={voiceChat.joinVoice}
+                className="h-9 flex-1 rounded-xl bg-[#d6ff3f] text-xs font-bold text-black hover:bg-[#e1ff70]"
+              >
+                Try Again
+              </Button>
+              <Button
+                onClick={voiceChat.clearPermissionError}
+                variant="outline"
+                className="h-9 flex-1 rounded-xl border-white/10 text-xs font-bold text-neutral-300 hover:bg-white/10"
+              >
+                Continue Without Voice
               </Button>
             </div>
           </div>

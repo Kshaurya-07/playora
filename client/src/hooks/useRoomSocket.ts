@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { classifyDrift, DriftStatus } from "@shared/watch-party";
 import { toast } from "sonner";
 
@@ -16,11 +16,14 @@ export interface RoomMemberPresence {
   role: "host" | "moderator" | "participant";
   isMuted: boolean;
   isSpeaking: boolean;
+  isVoiceActive?: boolean;
+  connectionStatus?: "connected" | "reconnecting";
   watchingPosition: number;
 }
 
 export interface ChatMessageItem {
   id: number;
+  eventId?: string;
   roomId: number;
   userId: number;
   senderName: string;
@@ -57,6 +60,9 @@ export interface UseRoomSocketProps {
   onKicked?: (message: string) => void;
 }
 
+export type RoomConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
+export type RoomMembershipState = "IDLE" | "JOINING" | "JOINED" | "LEAVING" | "LEFT";
+
 export function useRoomSocket({
   roomCode,
   user,
@@ -69,13 +75,13 @@ export function useRoomSocket({
   onKicked,
 }: UseRoomSocketProps) {
   const wsRef = useRef<WebSocket | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<RoomConnectionStatus>("connecting");
   const [peerId, setPeerId] = useState<string>("");
   const [role, setRole] = useState<"host" | "moderator" | "participant">("participant");
   const [members, setMembers] = useState<RoomMemberPresence[]>([]);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [activeReaction, setActiveReaction] = useState<{ emoji: string; id: number } | null>(null);
-  const [clockOffset, setClockOffset] = useState<number>(0); // Server - Client ms offset
+  const [clockOffset, setClockOffset] = useState<number>(0);
   const [latencyMs, setLatencyMs] = useState<number>(20);
   const [roomPlayback, setRoomPlayback] = useState<PlaybackState>({
     isPlaying: false,
@@ -93,8 +99,44 @@ export function useRoomSocket({
     allowVoice: true,
   });
 
+  // Stable references to prevent callback changes from triggering reconnects
+  const callbacksRef = useRef({
+    onPlaybackSync,
+    onVoiceSignal,
+    onCountdownTick,
+    onContentChanged,
+    onKicked,
+  });
+  useEffect(() => {
+    callbacksRef.current = {
+      onPlaybackSync,
+      onVoiceSignal,
+      onCountdownTick,
+      onContentChanged,
+      onKicked,
+    };
+  });
+
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const platformRef = useRef(platform);
+  useEffect(() => {
+    platformRef.current = platform;
+  }, [platform]);
+
+  const contentUrlRef = useRef(contentUrl);
+  useEffect(() => {
+    contentUrlRef.current = contentUrl;
+  }, [contentUrl]);
+
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isUnmountingRef = useRef(false);
+  const membershipStateRef = useRef<RoomMembershipState>("IDLE");
+  const seenEventIdsRef = useRef<Set<string>>(new Set());
 
   // NTP Clock Ping
   const pingClock = useCallback(() => {
@@ -110,27 +152,51 @@ export function useRoomSocket({
 
   const connect = useCallback(() => {
     if (!roomCode || isUnmountingRef.current) return;
+    if (membershipStateRef.current === "LEAVING" || membershipStateRef.current === "LEFT") return;
+
+    // Close any previous socket cleanly if still around
+    if (wsRef.current) {
+      try {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.onopen = null;
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
+    }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     const socketUrl = `${protocol}//${host}/api/ws`;
 
+    membershipStateRef.current = "JOINING";
+    setConnectionStatus((prev) => (prev === "connected" ? "reconnecting" : "connecting"));
+
     const ws = new WebSocket(socketUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      setConnected(true);
-      // Join Room
+      if (isUnmountingRef.current || wsRef.current !== ws) {
+        ws.close();
+        return;
+      }
+
+      membershipStateRef.current = "JOINED";
+      setConnectionStatus("connected");
+
+      // Send join_room with stable parameters
       ws.send(
         JSON.stringify({
           type: "join_room",
           roomCode,
-          user,
-          platform,
-          contentUrl,
+          user: userRef.current,
+          platform: platformRef.current,
+          contentUrl: contentUrlRef.current,
         })
       );
-      // Immediately run clock sync
+
+      // Run initial clock sync
       pingClock();
     };
 
@@ -152,7 +218,12 @@ export function useRoomSocket({
           setPeerId(data.yourPeerId);
           setRole(data.role);
           setMembers(data.members || []);
-          if (data.messages) setMessages(data.messages);
+          if (data.messages) {
+            setMessages(data.messages);
+            data.messages.forEach((m: ChatMessageItem) => {
+              if (m.eventId) seenEventIdsRef.current.add(m.eventId);
+            });
+          }
           if (data.queue) setQueue(data.queue);
           if (data.room) {
             setRoomPlayback({
@@ -185,7 +256,7 @@ export function useRoomSocket({
             currentPosition: 0,
             serverTime: Date.now(),
           });
-          onContentChanged?.(data);
+          callbacksRef.current.onContentChanged?.(data);
           return;
         }
 
@@ -201,7 +272,7 @@ export function useRoomSocket({
 
         if (data.type === "kicked") {
           toast.error(data.message || "You were removed from the room");
-          onKicked?.(data.message || "You were removed by host");
+          callbacksRef.current.onKicked?.(data.message || "You were removed by host");
           return;
         }
 
@@ -216,12 +287,30 @@ export function useRoomSocket({
             currentPosition: data.position,
             serverTime: data.serverTime || Date.now(),
           });
-          onPlaybackSync?.(data);
+          callbacksRef.current.onPlaybackSync?.(data);
           return;
         }
 
         if (data.type === "chat_message") {
-          setMessages((prev) => [...prev, data.message]);
+          const msg: ChatMessageItem = data.message;
+          // System message deduplication check
+          if (msg.messageType === "system") {
+            const eventKey = msg.eventId || `${msg.content}_${Math.floor(Date.now() / 3000)}`;
+            if (seenEventIdsRef.current.has(eventKey)) {
+              return;
+            }
+            seenEventIdsRef.current.add(eventKey);
+            if (seenEventIdsRef.current.size > 200) {
+              const pruned = Array.from(seenEventIdsRef.current).slice(100);
+              seenEventIdsRef.current = new Set(pruned);
+            }
+          }
+
+          setMessages((prev) => {
+            // Avoid duplicate by id
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
           return;
         }
 
@@ -236,12 +325,12 @@ export function useRoomSocket({
         }
 
         if (data.type === "countdown_tick") {
-          onCountdownTick?.(data.count, data.message);
+          callbacksRef.current.onCountdownTick?.(data.count, data.message);
           return;
         }
 
         if (data.type === "voice_signal") {
-          onVoiceSignal?.(data.senderPeerId, data.senderName, data.signal);
+          callbacksRef.current.onVoiceSignal?.(data.senderPeerId, data.senderName, data.signal);
           return;
         }
 
@@ -254,33 +343,51 @@ export function useRoomSocket({
       }
     };
 
-    ws.onclose = () => {
-      setConnected(false);
-      if (!isUnmountingRef.current) {
-        reconnectTimeoutRef.current = setTimeout(() => {
+    ws.onclose = (ev) => {
+      if (isUnmountingRef.current) return;
+      if (membershipStateRef.current === "LEAVING" || membershipStateRef.current === "LEFT") return;
+
+      setConnectionStatus("reconnecting");
+
+      // Auto-reconnect after grace period interval
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        if (!isUnmountingRef.current && membershipStateRef.current !== "LEFT") {
           connect();
-        }, 2500);
-      }
+        }
+      }, 2000);
     };
 
     ws.onerror = () => {
-      ws.close();
+      try {
+        ws.close();
+      } catch {}
     };
-  }, [roomCode, user, platform, contentUrl, pingClock, onPlaybackSync, onVoiceSignal, onCountdownTick]);
+  }, [roomCode, pingClock]);
 
+  // Master lifecycle initialization effect - runs ONLY when roomCode changes
   useEffect(() => {
     isUnmountingRef.current = false;
+    membershipStateRef.current = "IDLE";
     connect();
 
-    const clockInterval = setInterval(pingClock, 15000);
+    if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+    pingIntervalRef.current = setInterval(pingClock, 15000);
 
     return () => {
       isUnmountingRef.current = true;
-      clearInterval(clockInterval);
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        try {
+          wsRef.current.onclose = null;
+          wsRef.current.close();
+        } catch {}
+        wsRef.current = null;
+      }
+      membershipStateRef.current = "LEFT";
     };
-  }, [connect, pingClock]);
+  }, [roomCode, connect, pingClock]);
 
   // Compute live projected room position and drift classification
   const calculateDrift = useCallback(
@@ -352,6 +459,28 @@ export function useRoomSocket({
         JSON.stringify({
           type: "countdown",
           seconds,
+        })
+      );
+    }
+  }, []);
+
+  // Voice Chat Signaling
+  const joinVoiceChannel = useCallback((isMuted: boolean) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "voice_join",
+          isMuted,
+        })
+      );
+    }
+  }, []);
+
+  const leaveVoiceChannel = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "voice_leave",
         })
       );
     }
@@ -438,8 +567,24 @@ export function useRoomSocket({
     }
   }, []);
 
+  // Authoritative intentional room exit
+  const leaveRoom = useCallback(() => {
+    membershipStateRef.current = "LEAVING";
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: "leave_room" }));
+      } catch {}
+      try {
+        wsRef.current.close(1000, "User left party");
+      } catch {}
+    }
+    membershipStateRef.current = "LEFT";
+    setConnectionStatus("disconnected");
+  }, []);
+
   return {
-    connected,
+    connected: connectionStatus === "connected",
+    connectionStatus,
     peerId,
     role,
     members,
@@ -459,6 +604,8 @@ export function useRoomSocket({
     deleteChatMessage,
     sendReaction,
     triggerCountdown,
+    joinVoiceChannel,
+    leaveVoiceChannel,
     updateVoiceState,
     sendVoiceSignal,
     changeContent,
@@ -466,5 +613,6 @@ export function useRoomSocket({
     transferHost,
     kickPeer,
     updateSettings,
+    leaveRoom,
   };
 }

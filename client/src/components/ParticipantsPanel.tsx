@@ -77,19 +77,41 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                         </span>
                       )}
                     </div>
-                    <p className="mt-0.5 text-[10px] text-neutral-500">
-                      {member.isSpeaking ? "Speaking..." : "Listening"}
-                    </p>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[10px]">
+                      {member.connectionStatus === "reconnecting" ? (
+                        <span className="font-semibold text-amber-400 animate-pulse">🟡 Reconnecting...</span>
+                      ) : member.isVoiceActive ? (
+                        member.isSpeaking ? (
+                          <span className="font-bold text-[#d6ff3f]">Speaking...</span>
+                        ) : member.isMuted ? (
+                          <span className="text-neutral-400">Voice (Muted)</span>
+                        ) : (
+                          <span className="text-emerald-400">Voice Connected</span>
+                        )
+                      ) : (
+                        <span className="text-neutral-500">Watching (Chat only)</span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Mic Status */}
+                {/* Mic & Presence Status */}
                 <div className="text-neutral-400">
-                  {member.isMuted ? (
-                    <MicOff size={14} className="text-neutral-600" />
-                  ) : (
-                    <Mic size={14} className={member.isSpeaking ? "text-[#d6ff3f]" : "text-neutral-400"} />
-                  )}
+                  {member.connectionStatus === "reconnecting" ? (
+                    <span title="Reconnecting">
+                      <Activity size={14} className="text-amber-400 animate-pulse" />
+                    </span>
+                  ) : member.isVoiceActive ? (
+                    member.isMuted ? (
+                      <span title="Muted">
+                        <MicOff size={14} className="text-amber-400/80" />
+                      </span>
+                    ) : (
+                      <span title="Voice Active">
+                        <Mic size={14} className={member.isSpeaking ? "text-[#d6ff3f]" : "text-emerald-400"} />
+                      </span>
+                    )
+                  ) : null}
                 </div>
               </div>
 

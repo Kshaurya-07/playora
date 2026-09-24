@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { RoomMemberPresence } from "./useRoomSocket";
+
+export type VoiceConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
 
 export interface VoicePeer {
   peerId: string;
@@ -12,9 +15,11 @@ export interface VoicePeer {
 
 interface UseVoiceChatProps {
   myPeerId: string;
-  activeMembers: { peerId: string; name: string }[];
+  activeMembers: RoomMemberPresence[];
   sendSignal: (targetPeerId: string, signal: any) => void;
   onSpeakingChange: (isSpeaking: boolean) => void;
+  joinVoiceChannel?: (isMuted: boolean) => void;
+  leaveVoiceChannel?: () => void;
 }
 
 const RTC_CONFIG: RTCConfiguration = {
@@ -29,11 +34,14 @@ export function useVoiceChat({
   activeMembers,
   sendSignal,
   onSpeakingChange,
+  joinVoiceChannel,
+  leaveVoiceChannel,
 }: UseVoiceChatProps) {
-  const [joined, setJoined] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceConnectionState>("disconnected");
   const [muted, setMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({});
+  const [permissionError, setPermissionError] = useState<string | null>(null);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, VoicePeer>>(new Map());
@@ -41,6 +49,38 @@ export function useVoiceChat({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const joinedRef = useRef<boolean>(false);
+
+  // Stable references for external callbacks
+  const sendSignalRef = useRef(sendSignal);
+  useEffect(() => {
+    sendSignalRef.current = sendSignal;
+  });
+
+  const onSpeakingChangeRef = useRef(onSpeakingChange);
+  useEffect(() => {
+    onSpeakingChangeRef.current = onSpeakingChange;
+  });
+
+  const joinVoiceChannelRef = useRef(joinVoiceChannel);
+  useEffect(() => {
+    joinVoiceChannelRef.current = joinVoiceChannel;
+  });
+
+  const leaveVoiceChannelRef = useRef(leaveVoiceChannel);
+  useEffect(() => {
+    leaveVoiceChannelRef.current = leaveVoiceChannel;
+  });
+
+  const myPeerIdRef = useRef(myPeerId);
+  useEffect(() => {
+    myPeerIdRef.current = myPeerId;
+  }, [myPeerId]);
+
+  const activeMembersRef = useRef(activeMembers);
+  useEffect(() => {
+    activeMembersRef.current = activeMembers;
+  }, [activeMembers]);
 
   // Setup local audio level analyzer to detect speaking
   const setupAudioAnalyzer = (stream: MediaStream) => {
@@ -61,7 +101,7 @@ export function useVoiceChat({
       let wasSpeaking = false;
 
       const checkSpeaking = () => {
-        if (!analyserRef.current || !ctx) return;
+        if (!analyserRef.current || !ctx || !joinedRef.current) return;
         analyserRef.current.getByteFrequencyData(buffer);
 
         let sum = 0;
@@ -74,7 +114,7 @@ export function useVoiceChat({
         if (nowSpeaking !== wasSpeaking) {
           wasSpeaking = nowSpeaking;
           setIsSpeaking(nowSpeaking);
-          onSpeakingChange(nowSpeaking);
+          onSpeakingChangeRef.current(nowSpeaking);
         }
 
         animFrameRef.current = requestAnimationFrame(checkSpeaking);
@@ -104,7 +144,7 @@ export function useVoiceChat({
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          sendSignal(targetPeerId, {
+          sendSignalRef.current(targetPeerId, {
             type: "candidate",
             candidate: event.candidate,
           });
@@ -113,7 +153,6 @@ export function useVoiceChat({
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0];
-        // Create audio playback element
         let audio = audioElementsRef.current.get(targetPeerId);
         if (!audio) {
           audio = new Audio();
@@ -123,6 +162,25 @@ export function useVoiceChat({
         audio.srcObject = remoteStream;
         const vol = peerVolumes[targetPeerId] ?? 1.0;
         audio.volume = vol;
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (!joinedRef.current) return;
+        if (pc.iceConnectionState === "disconnected") {
+          setVoiceState("reconnecting");
+          // Attempt graceful ICE restart
+          pc.createOffer({ iceRestart: true })
+            .then((offer) => pc.setLocalDescription(offer))
+            .then(() => {
+              sendSignalRef.current(targetPeerId, {
+                type: "offer",
+                sdp: pc.localDescription,
+              });
+            })
+            .catch(() => {});
+        } else if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+          setVoiceState("connected");
+        }
       };
 
       const voicePeer: VoicePeer = {
@@ -138,7 +196,7 @@ export function useVoiceChat({
         pc.createOffer({ offerToReceiveAudio: true })
           .then((offer) => pc.setLocalDescription(offer))
           .then(() => {
-            sendSignal(targetPeerId, {
+            sendSignalRef.current(targetPeerId, {
               type: "offer",
               sdp: pc.localDescription,
             });
@@ -148,11 +206,16 @@ export function useVoiceChat({
 
       return pc;
     },
-    [sendSignal, peerVolumes]
+    [peerVolumes]
   );
 
   // Join Voice Channel
   const joinVoice = useCallback(async () => {
+    if (joinedRef.current || voiceState === "connecting") return;
+
+    setVoiceState("connecting");
+    setPermissionError(null);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -161,60 +224,108 @@ export function useVoiceChat({
           autoGainControl: true,
         },
       });
+
       localStreamRef.current = stream;
-      setJoined(true);
+      joinedRef.current = true;
+      setVoiceState("connected");
       setMuted(false);
       setupAudioAnalyzer(stream);
 
-      // Connect to all existing peers in the room
-      activeMembers.forEach((member) => {
-        if (member.peerId !== myPeerId) {
+      // Notify WebSocket server that we joined voice
+      joinVoiceChannelRef.current?.(false);
+
+      // Connect to other members in voice
+      const myId = myPeerIdRef.current;
+      activeMembersRef.current.forEach((member) => {
+        if (member.peerId !== myId) {
           createPeerConnection(member.peerId, member.name, true);
         }
       });
 
-      toast.success("Connected to room voice chat", {
-        description: "Speak freely; friends will hear you in real time.",
+      toast.success("Voice Connected", {
+        description: "Speak freely; friends can hear you in real time.",
       });
     } catch (err: any) {
       console.warn("[Voice] Microphone access error:", err);
-      toast.error("Could not access microphone", {
-        description: "Check browser permissions. Watch party & chat will continue normally.",
-      });
-      setJoined(false);
+      joinedRef.current = false;
+      setVoiceState("disconnected");
+
+      const isPermissionDenied =
+        err?.name === "NotAllowedError" ||
+        err?.name === "PermissionDeniedError" ||
+        err?.name === "SecurityError";
+
+      if (isPermissionDenied) {
+        setPermissionError("Microphone permission was denied. Please allow microphone access in your browser.");
+        toast.error("Microphone permission required", {
+          description: "Microphone access is needed to speak. Watch party and chat continue normally.",
+        });
+      } else {
+        toast.error("Could not access microphone", {
+          description: "Check your audio input devices.",
+        });
+      }
     }
-  }, [activeMembers, myPeerId, createPeerConnection]);
+  }, [voiceState, createPeerConnection]);
 
   // Leave Voice Channel
-  const leaveVoice = useCallback(() => {
+  const leaveVoice = useCallback((isExplicit = false) => {
+    if (!joinedRef.current && !localStreamRef.current) {
+      return;
+    }
+
+    joinedRef.current = false;
+    setVoiceState("disconnected");
+    setIsSpeaking(false);
+    onSpeakingChangeRef.current(false);
+
+    // Stop local media stream
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+      });
       localStreamRef.current = null;
     }
 
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
     if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
+      try {
+        audioContextRef.current.close().catch(() => {});
+      } catch {}
       audioContextRef.current = null;
     }
 
-    peersRef.current.forEach((peer) => peer.pc.close());
+    peersRef.current.forEach((peer) => {
+      try {
+        peer.pc.close();
+      } catch {}
+    });
     peersRef.current.clear();
 
     audioElementsRef.current.forEach((audio) => {
-      audio.srcObject = null;
+      try {
+        audio.srcObject = null;
+      } catch {}
     });
     audioElementsRef.current.clear();
 
-    setJoined(false);
-    setIsSpeaking(false);
-    onSpeakingChange(false);
-    toast.info("Left voice chat");
-  }, [onSpeakingChange]);
+    // Notify room server of voice departure
+    leaveVoiceChannelRef.current?.();
+
+    if (isExplicit) {
+      toast.info("Left voice chat");
+    }
+  }, []);
 
   // Toggle Mute
   const toggleMute = useCallback(() => {
-    if (!localStreamRef.current) return;
+    if (!localStreamRef.current || !joinedRef.current) return;
     const nextMuted = !muted;
     localStreamRef.current.getAudioTracks().forEach((track) => {
       track.enabled = !nextMuted;
@@ -222,15 +333,14 @@ export function useVoiceChat({
     setMuted(nextMuted);
     if (nextMuted) {
       setIsSpeaking(false);
-      onSpeakingChange(false);
+      onSpeakingChangeRef.current(false);
     }
-  }, [muted, onSpeakingChange]);
+  }, [muted]);
 
   // Handle incoming WebRTC signaling message
   const handleVoiceSignal = useCallback(
     async (senderPeerId: string, senderName: string, signal: any) => {
-      if (!joined && signal.type === "offer") {
-        // Peer is calling us; if not in voice, ignore
+      if (!joinedRef.current && signal.type === "offer") {
         return;
       }
 
@@ -246,7 +356,7 @@ export function useVoiceChat({
           await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          sendSignal(senderPeerId, {
+          sendSignalRef.current(senderPeerId, {
             type: "answer",
             sdp: pc.localDescription,
           });
@@ -259,7 +369,7 @@ export function useVoiceChat({
         console.warn("[Voice] Error handling WebRTC signal:", err);
       }
     },
-    [joined, createPeerConnection, sendSignal]
+    [createPeerConnection]
   );
 
   // Set individual participant volume
@@ -272,20 +382,26 @@ export function useVoiceChat({
     }
   }, []);
 
+  // Silent cleanup only when unmounting the entire room component
   useEffect(() => {
     return () => {
-      leaveVoice();
+      if (joinedRef.current) {
+        leaveVoice(false);
+      }
     };
   }, [leaveVoice]);
 
   return {
-    joined,
+    voiceState,
+    joined: voiceState === "connected",
     muted,
     isSpeaking,
     peerVolumes,
+    permissionError,
     connectedPeersCount: peersRef.current.size,
+    clearPermissionError: () => setPermissionError(null),
     joinVoice,
-    leaveVoice,
+    leaveVoice: () => leaveVoice(true),
     toggleMute,
     handleVoiceSignal,
     setPeerVolume,

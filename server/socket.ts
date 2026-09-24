@@ -12,6 +12,7 @@ export interface ClientSession {
   role: "host" | "moderator" | "participant";
   isMuted: boolean;
   isSpeaking: boolean;
+  isVoiceActive: boolean;
   currentPosition: number;
   lastPing: number;
 }
@@ -24,13 +25,33 @@ export interface RoomPresenceMember {
   role: "host" | "moderator" | "participant";
   isMuted: boolean;
   isSpeaking: boolean;
+  isVoiceActive: boolean;
+  connectionStatus: "connected" | "reconnecting";
   watchingPosition: number;
 }
+
+interface RoomUserRecord {
+  userId: number;
+  userName: string;
+  avatarColor: string;
+  role: "host" | "moderator" | "participant";
+  peerId: string;
+  sockets: Set<WebSocket>;
+  isMuted: boolean;
+  isSpeaking: boolean;
+  isVoiceActive: boolean;
+  currentPosition: number;
+  connectionStatus: "connected" | "reconnecting";
+  disconnectTimeout?: NodeJS.Timeout;
+}
+
+const DISCONNECT_GRACE_PERIOD_MS = 15000; // 15 seconds grace period for temporary drops/refreshes
 
 export function initWebSocketServer(server: HttpServer) {
   const wss = new WebSocketServer({ server, path: "/api/ws" });
   const clients = new Map<WebSocket, ClientSession>();
-  const rooms = new Map<string, Set<WebSocket>>();
+  const roomSockets = new Map<string, Set<WebSocket>>();
+  const roomMembers = new Map<string, Map<number, RoomUserRecord>>();
   const roomQueues = new Map<string, any[]>();
 
   const broadcastToRoom = (
@@ -38,7 +59,7 @@ export function initWebSocketServer(server: HttpServer) {
     message: object,
     excludeWs?: WebSocket
   ) => {
-    const sockets = rooms.get(roomCode.toUpperCase());
+    const sockets = roomSockets.get(roomCode.toUpperCase());
     if (!sockets) return;
     const payload = JSON.stringify(message);
     for (const socket of sockets) {
@@ -49,58 +70,135 @@ export function initWebSocketServer(server: HttpServer) {
   };
 
   const getRoomMembers = (roomCode: string): RoomPresenceMember[] => {
-    const sockets = rooms.get(roomCode.toUpperCase());
-    if (!sockets) return [];
+    const users = roomMembers.get(roomCode.toUpperCase());
+    if (!users) return [];
     const members: RoomPresenceMember[] = [];
-    for (const ws of sockets) {
-      const session = clients.get(ws);
-      if (session) {
-        members.push({
-          peerId: session.peerId,
-          userId: session.userId,
-          name: session.userName,
-          avatarColor: session.avatarColor,
-          role: session.role,
-          isMuted: session.isMuted,
-          isSpeaking: session.isSpeaking,
-          watchingPosition: session.currentPosition,
-        });
-      }
+    for (const record of users.values()) {
+      members.push({
+        peerId: record.peerId,
+        userId: record.userId,
+        name: record.userName,
+        avatarColor: record.avatarColor,
+        role: record.role,
+        isMuted: record.isMuted,
+        isSpeaking: record.isSpeaking,
+        isVoiceActive: record.isVoiceActive,
+        connectionStatus: record.connectionStatus,
+        watchingPosition: record.currentPosition,
+      });
     }
     return members;
   };
 
-  const leaveCurrentRoom = (ws: WebSocket) => {
+  const handleSocketDisconnect = (ws: WebSocket, isExplicitLeave = false) => {
     const session = clients.get(ws);
-    if (!session || !session.roomCode) return;
-
-    const roomCode = session.roomCode.toUpperCase();
-    const roomSet = rooms.get(roomCode);
-    if (roomSet) {
-      roomSet.delete(ws);
-      if (roomSet.size === 0) {
-        rooms.delete(roomCode);
-      }
+    if (!session || !session.roomCode) {
+      clients.delete(ws);
+      return;
     }
 
+    const roomCode = session.roomCode.toUpperCase();
+    const userId = session.userId;
+
+    const sockets = roomSockets.get(roomCode);
+    if (sockets) {
+      sockets.delete(ws);
+    }
+
+    const users = roomMembers.get(roomCode);
+    if (!users) {
+      clients.delete(ws);
+      return;
+    }
+
+    const userRecord = users.get(userId);
+    if (!userRecord) {
+      clients.delete(ws);
+      return;
+    }
+
+    userRecord.sockets.delete(ws);
+    clients.delete(ws);
+
+    if (isExplicitLeave) {
+      // User explicitly clicked "Leave Party"
+      if (userRecord.disconnectTimeout) {
+        clearTimeout(userRecord.disconnectTimeout);
+        userRecord.disconnectTimeout = undefined;
+      }
+      users.delete(userId);
+      if (users.size === 0) {
+        roomMembers.delete(roomCode);
+        roomSockets.delete(roomCode);
+      }
+
+      broadcastToRoom(roomCode, {
+        type: "presence_update",
+        members: getRoomMembers(roomCode),
+      });
+
+      const eventId = `leave_${roomCode}_${userId}_${Date.now()}`;
+      broadcastToRoom(roomCode, {
+        type: "chat_message",
+        message: {
+          eventId,
+          id: Date.now(),
+          senderName: "PlayOra",
+          senderColor: "#D6FF3F",
+          content: `${userRecord.userName} left the party`,
+          messageType: "system",
+          createdAt: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    // Check if the user still has another active tab/socket
+    if (userRecord.sockets.size > 0) {
+      return;
+    }
+
+    // No active sockets: initiate disconnect grace period
+    userRecord.connectionStatus = "reconnecting";
     broadcastToRoom(roomCode, {
       type: "presence_update",
       members: getRoomMembers(roomCode),
     });
 
-    broadcastToRoom(roomCode, {
-      type: "chat_message",
-      message: {
-        id: Date.now(),
-        senderName: "PlayOra",
-        senderColor: "#D6FF3F",
-        content: `${session.userName} left the party`,
-        messageType: "system",
-        createdAt: new Date().toISOString(),
-      },
-    });
+    if (userRecord.disconnectTimeout) {
+      clearTimeout(userRecord.disconnectTimeout);
+    }
 
-    session.roomCode = undefined;
+    userRecord.disconnectTimeout = setTimeout(() => {
+      // Grace period expired without reconnection!
+      const currentUsers = roomMembers.get(roomCode);
+      if (currentUsers && currentUsers.get(userId) === userRecord) {
+        currentUsers.delete(userId);
+        if (currentUsers.size === 0) {
+          roomMembers.delete(roomCode);
+          roomSockets.delete(roomCode);
+        }
+
+        broadcastToRoom(roomCode, {
+          type: "presence_update",
+          members: getRoomMembers(roomCode),
+        });
+
+        const eventId = `leave_${roomCode}_${userId}_${Date.now()}`;
+        broadcastToRoom(roomCode, {
+          type: "chat_message",
+          message: {
+            eventId,
+            id: Date.now(),
+            senderName: "PlayOra",
+            senderColor: "#D6FF3F",
+            content: `${userRecord.userName} left the party`,
+            messageType: "system",
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+    }, DISCONNECT_GRACE_PERIOD_MS);
   };
 
   wss.on("connection", (ws: WebSocket) => {
@@ -114,6 +212,7 @@ export function initWebSocketServer(server: HttpServer) {
       role: "participant",
       isMuted: false,
       isSpeaking: false,
+      isVoiceActive: false,
       currentPosition: 0,
       lastPing: Date.now(),
     };
@@ -136,25 +235,38 @@ export function initWebSocketServer(server: HttpServer) {
         }
 
         if (type === "join_room") {
-          leaveCurrentRoom(ws);
-
           const roomCode = String(data.roomCode || "").toUpperCase().trim();
           const user = data.user || {};
+          const userId = Number(user.id) || session.userId || Date.now();
+          const userName = String(user.name || "Guest").trim();
+          const avatarColor = String(user.avatarColor || "#8EABE9");
 
           session.roomCode = roomCode;
-          session.userId = Number(user.id) || Date.now();
-          session.userName = String(user.name || "Guest").trim();
-          session.avatarColor = String(user.avatarColor || "#8EABE9");
+          session.userId = userId;
+          session.userName = userName;
+          session.avatarColor = avatarColor;
+
+          let users = roomMembers.get(roomCode);
+          if (!users) {
+            users = new Map<number, RoomUserRecord>();
+            roomMembers.set(roomCode, users);
+          }
+
+          let sockets = roomSockets.get(roomCode);
+          if (!sockets) {
+            sockets = new Set<WebSocket>();
+            roomSockets.set(roomCode, sockets);
+          }
+          sockets.add(ws);
 
           let room = await db.getRoomByCode(roomCode);
           if (!room) {
-            // Auto-provision room if not found in db so party links work smoothly
             room = await db.createRoom({
               code: roomCode,
               title: "Watch Party " + roomCode,
               platform: data.platform || "youtube",
               contentUrl: data.contentUrl || "https://www.youtube.com/watch?v=M7lc1UVf-VE",
-              hostId: session.userId,
+              hostId: userId,
               isPlaying: false,
               currentPosition: 0,
               settings: {
@@ -167,12 +279,44 @@ export function initWebSocketServer(server: HttpServer) {
             });
           }
 
-          session.role = room.hostId === session.userId ? "host" : "participant";
+          let isFirstJoin = false;
+          let userRecord = users.get(userId);
 
-          if (!rooms.has(roomCode)) {
-            rooms.set(roomCode, new Set());
+          if (userRecord) {
+            // User reconnecting or joining via another tab
+            if (userRecord.disconnectTimeout) {
+              clearTimeout(userRecord.disconnectTimeout);
+              userRecord.disconnectTimeout = undefined;
+            }
+            userRecord.connectionStatus = "connected";
+            userRecord.sockets.add(ws);
+            userRecord.peerId = session.peerId;
+            userRecord.userName = userName;
+            userRecord.avatarColor = avatarColor;
+            session.role = userRecord.role;
+            session.isVoiceActive = userRecord.isVoiceActive;
+            session.isMuted = userRecord.isMuted;
+          } else {
+            // First time joining the room
+            isFirstJoin = true;
+            const role: "host" | "participant" = room.hostId === userId ? "host" : "participant";
+            session.role = role;
+
+            userRecord = {
+              userId,
+              userName,
+              avatarColor,
+              role,
+              peerId: session.peerId,
+              sockets: new Set([ws]),
+              isMuted: false,
+              isSpeaking: false,
+              isVoiceActive: false,
+              currentPosition: 0,
+              connectionStatus: "connected",
+            };
+            users.set(userId, userRecord);
           }
-          rooms.get(roomCode)!.add(ws);
 
           // Calculate projected playback position
           const now = Date.now();
@@ -181,7 +325,7 @@ export function initWebSocketServer(server: HttpServer) {
             ? room.currentPosition + Math.max(0, elapsed)
             : room.currentPosition;
 
-          // Send current state to newly joined client
+          // Send current state to newly connected client
           ws.send(
             JSON.stringify({
               type: "room_state",
@@ -198,24 +342,35 @@ export function initWebSocketServer(server: HttpServer) {
             })
           );
 
-          // Broadcast presence update to everyone in the room
+          // Broadcast presence update
           broadcastToRoom(roomCode, {
             type: "presence_update",
             members: getRoomMembers(roomCode),
           });
 
-          // Broadcast system join notification
-          broadcastToRoom(roomCode, {
-            type: "chat_message",
-            message: {
-              id: Date.now(),
-              senderName: "PlayOra",
-              senderColor: "#D6FF3F",
-              content: `${session.userName} entered the room`,
-              messageType: "system",
-              createdAt: new Date().toISOString(),
-            },
-          });
+          // ONLY broadcast system join message if this is the user's first active join
+          if (isFirstJoin) {
+            const eventId = `join_${roomCode}_${userId}_${Date.now()}`;
+            broadcastToRoom(roomCode, {
+              type: "chat_message",
+              message: {
+                eventId,
+                id: Date.now(),
+                roomId: room.id,
+                userId,
+                senderName: "PlayOra",
+                senderColor: "#D6FF3F",
+                content: `${userName} entered the room`,
+                messageType: "system",
+                createdAt: new Date().toISOString(),
+              },
+            });
+          }
+          return;
+        }
+
+        if (type === "leave_room") {
+          handleSocketDisconnect(ws, true);
           return;
         }
 
@@ -312,24 +467,63 @@ export function initWebSocketServer(server: HttpServer) {
           return;
         }
 
+        // Voice state separation: join, leave, mute/speaking
+        if (type === "voice_join") {
+          const users = roomMembers.get(roomCode);
+          const userRecord = users?.get(session.userId);
+          if (userRecord) {
+            userRecord.isVoiceActive = true;
+            userRecord.isMuted = Boolean(data.isMuted);
+            session.isVoiceActive = true;
+            session.isMuted = userRecord.isMuted;
+            broadcastToRoom(roomCode, {
+              type: "presence_update",
+              members: getRoomMembers(roomCode),
+            });
+          }
+          return;
+        }
+
+        if (type === "voice_leave") {
+          const users = roomMembers.get(roomCode);
+          const userRecord = users?.get(session.userId);
+          if (userRecord) {
+            userRecord.isVoiceActive = false;
+            userRecord.isSpeaking = false;
+            session.isVoiceActive = false;
+            session.isSpeaking = false;
+            broadcastToRoom(roomCode, {
+              type: "presence_update",
+              members: getRoomMembers(roomCode),
+            });
+          }
+          return;
+        }
+
         if (type === "voice_state") {
-          session.isMuted = Boolean(data.isMuted);
-          session.isSpeaking = Boolean(data.isSpeaking);
-          broadcastToRoom(roomCode, {
-            type: "presence_update",
-            members: getRoomMembers(roomCode),
-          });
+          const users = roomMembers.get(roomCode);
+          const userRecord = users?.get(session.userId);
+          if (userRecord) {
+            userRecord.isMuted = Boolean(data.isMuted);
+            userRecord.isSpeaking = Boolean(data.isSpeaking);
+            session.isMuted = userRecord.isMuted;
+            session.isSpeaking = userRecord.isSpeaking;
+            broadcastToRoom(roomCode, {
+              type: "presence_update",
+              members: getRoomMembers(roomCode),
+            });
+          }
           return;
         }
 
         if (type === "voice_signal") {
           // Relay WebRTC signaling between peers
           const { targetPeerId, signal } = data;
-          const sockets = rooms.get(roomCode.toUpperCase());
+          const sockets = roomSockets.get(roomCode);
           if (sockets) {
             for (const socket of sockets) {
               const targetSession = clients.get(socket);
-              if (targetSession && targetSession.peerId === targetPeerId) {
+              if (targetSession && targetSession.peerId === targetPeerId && socket.readyState === WebSocket.OPEN) {
                 socket.send(
                   JSON.stringify({
                     type: "voice_signal",
@@ -425,13 +619,20 @@ export function initWebSocketServer(server: HttpServer) {
         if (type === "transfer_host") {
           if (session.role !== "host") return;
           const targetPeerId = String(data.targetPeerId || "");
-          const sockets = rooms.get(roomCode.toUpperCase());
+          const sockets = roomSockets.get(roomCode);
           if (sockets) {
             for (const s of sockets) {
               const targetSession = clients.get(s);
               if (targetSession && targetSession.peerId === targetPeerId) {
                 targetSession.role = "host";
                 session.role = "participant";
+                const users = roomMembers.get(roomCode);
+                if (users) {
+                  const targetUser = users.get(targetSession.userId);
+                  if (targetUser) targetUser.role = "host";
+                  const hostUser = users.get(session.userId);
+                  if (hostUser) hostUser.role = "participant";
+                }
                 await db.updateRoomHost(room.id, targetSession.userId);
                 broadcastToRoom(roomCode, {
                   type: "presence_update",
@@ -458,7 +659,7 @@ export function initWebSocketServer(server: HttpServer) {
         if (type === "kick_peer") {
           if (session.role !== "host") return;
           const targetPeerId = String(data.targetPeerId || "");
-          const sockets = rooms.get(roomCode.toUpperCase());
+          const sockets = roomSockets.get(roomCode);
           if (sockets) {
             for (const s of sockets) {
               const targetSession = clients.get(s);
@@ -469,7 +670,7 @@ export function initWebSocketServer(server: HttpServer) {
                     message: "You were removed from the watch party by the host.",
                   })
                 );
-                leaveCurrentRoom(s);
+                handleSocketDisconnect(s, true);
                 s.close();
                 break;
               }
@@ -494,13 +695,11 @@ export function initWebSocketServer(server: HttpServer) {
     });
 
     ws.on("close", () => {
-      leaveCurrentRoom(ws);
-      clients.delete(ws);
+      handleSocketDisconnect(ws, false);
     });
 
     ws.on("error", () => {
-      leaveCurrentRoom(ws);
-      clients.delete(ws);
+      handleSocketDisconnect(ws, false);
     });
   });
 
