@@ -1,11 +1,25 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { classifyDrift, DriftStatus } from "@shared/watch-party";
+import {
+  classifyDrift,
+  computeForceSyncCorrection,
+  DriftStatus,
+  ForceSyncCorrection,
+} from "@shared/watch-party";
 import { toast } from "sonner";
 
 export interface SocketUser {
   id: number;
   name: string;
   avatarColor: string;
+}
+
+export interface JoinRequestNotification {
+  requestId: number;
+  userId: number;
+  userName: string;
+  avatarColor: string;
+  message?: string;
+  requestedAt: string;
 }
 
 export interface RoomMemberPresence {
@@ -37,6 +51,7 @@ export interface PlaybackState {
   isPlaying: boolean;
   currentPosition: number;
   serverTime: number;
+  sequence?: number;
 }
 
 export interface QueueItem {
@@ -100,6 +115,9 @@ export function useRoomSocket({
     allowReactions: true,
     allowVoice: true,
   });
+  const [pendingJoinApproval, setPendingJoinApproval] = useState(false);
+  const [incomingJoinRequests, setIncomingJoinRequests] = useState<JoinRequestNotification[]>([]);
+  const lastSequenceRef = useRef<number>(0);
 
   // Stable references to prevent callback changes from triggering reconnects
   const callbacksRef = useRef({
@@ -292,12 +310,60 @@ export function useRoomSocket({
         }
 
         if (data.type === "playback_sync") {
+          if (typeof data.sequence === "number") {
+            if (data.sequence < lastSequenceRef.current) return;
+            lastSequenceRef.current = data.sequence;
+          }
           setRoomPlayback({
             isPlaying: data.isPlaying,
             currentPosition: data.position,
             serverTime: data.serverTime || Date.now(),
+            sequence: data.sequence,
           });
           callbacksRef.current.onPlaybackSync?.(data);
+          return;
+        }
+
+        if (data.type === "sync_heartbeat") {
+          if (typeof data.sequence === "number" && data.sequence < lastSequenceRef.current) return;
+          if (typeof data.sequence === "number") lastSequenceRef.current = data.sequence;
+          setRoomPlayback({
+            isPlaying: data.isPlaying,
+            currentPosition: data.position,
+            serverTime: data.serverTime || Date.now(),
+            sequence: data.sequence,
+          });
+          return;
+        }
+
+        if (data.type === "join_request_received") {
+          setIncomingJoinRequests((prev) => [
+            ...prev.filter((r) => r.requestId !== data.requestId),
+            {
+              requestId: data.requestId,
+              userId: data.userId,
+              userName: data.userName,
+              avatarColor: data.avatarColor,
+              message: data.message,
+              requestedAt: data.requestedAt,
+            },
+          ]);
+          toast.info(`${data.userName} requested to join the party`, {
+            description: data.message ? `"${data.message}"` : "Approval required by host.",
+          });
+          return;
+        }
+
+        if (data.type === "join_approval_result") {
+          setPendingJoinApproval(false);
+          if (data.approved) {
+            toast.success("Host approved your join request!", {
+              description: "Welcome to the party! Connecting...",
+            });
+            connect();
+          } else {
+            toast.error("Host declined your join request.");
+          }
           return;
         }
 
@@ -399,9 +465,42 @@ export function useRoomSocket({
     };
   }, [roomCode, connect, pingClock]);
 
-  // Compute live projected room position and drift classification
+  // Tab visibility and network reconnect recovery
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        pingClock();
+        if (wsRef.current?.readyState !== WebSocket.OPEN && membershipStateRef.current !== "LEFT") {
+          connect();
+        }
+      }
+    };
+
+    const handleOnline = () => {
+      pingClock();
+      if (wsRef.current?.readyState !== WebSocket.OPEN && membershipStateRef.current !== "LEFT") {
+        connect();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [pingClock, connect]);
+
+  // Compute live projected room position and Force Sync 2.0 multi-tier drift classification
   const calculateDrift = useCallback(
-    (localPlayerPos: number): { driftSeconds: number; status: DriftStatus; projectedPos: number } => {
+    (
+      localPlayerPos: number
+    ): {
+      driftSeconds: number;
+      status: DriftStatus;
+      projectedPos: number;
+      correction: ForceSyncCorrection;
+    } => {
       const now = Date.now() + clockOffset;
       const elapsedSinceServer = Math.max(0, (now - roomPlayback.serverTime) / 1000);
       const projected = roomPlayback.isPlaying
@@ -410,9 +509,11 @@ export function useRoomSocket({
 
       const diff = localPlayerPos - projected;
       const status = classifyDrift(diff);
+      const correction = computeForceSyncCorrection(localPlayerPos, projected);
+
       setLocalDrift(diff);
       setDriftStatus(status);
-      return { driftSeconds: diff, status, projectedPos: projected };
+      return { driftSeconds: diff, status, projectedPos: projected, correction };
     },
     [roomPlayback, clockOffset]
   );
@@ -601,6 +702,36 @@ export function useRoomSocket({
     setConnectionStatus("disconnected");
   }, []);
 
+  // Host Approval Access Control
+  const requestJoinApproval = useCallback((message = "") => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setPendingJoinApproval(true);
+      wsRef.current.send(
+        JSON.stringify({
+          type: "join_request",
+          message,
+        })
+      );
+    }
+  }, []);
+
+  const respondToJoinRequest = useCallback(
+    (requestId: number, approved: boolean, targetUserId: number) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        setIncomingJoinRequests((prev) => prev.filter((r) => r.requestId !== requestId));
+        wsRef.current.send(
+          JSON.stringify({
+            type: "join_request_response",
+            requestId,
+            approved,
+            targetUserId,
+          })
+        );
+      }
+    },
+    []
+  );
+
   return {
     connected: connectionStatus === "connected",
     connectionStatus,
@@ -617,6 +748,8 @@ export function useRoomSocket({
     queue,
     roomContent,
     roomSettings,
+    pendingJoinApproval,
+    incomingJoinRequests,
     calculateDrift,
     broadcastPlayback,
     sendChatMessage,
@@ -634,5 +767,7 @@ export function useRoomSocket({
     updateSettings,
     leaveRoom,
     endParty,
+    requestJoinApproval,
+    respondToJoinRequest,
   };
 }

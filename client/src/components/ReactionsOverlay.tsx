@@ -1,5 +1,45 @@
 import React, { useEffect, useState } from "react";
 
+export interface ReactionItem {
+  emoji: string;
+  label: string;
+  category: "hype" | "laughter" | "emotion" | "celebrate";
+}
+
+export const AVAILABLE_REACTIONS: ReactionItem[] = [
+  // Hype & Energy
+  { emoji: "🔥", label: "Fire", category: "hype" },
+  { emoji: "⚡", label: "Electric", category: "hype" },
+  { emoji: "🚀", label: "Rocket", category: "hype" },
+  { emoji: "💯", label: "100", category: "hype" },
+  { emoji: "🍿", label: "Popcorn", category: "hype" },
+  { emoji: "🛸", label: "Cosmic", category: "hype" },
+
+  // Laughter & Fun
+  { emoji: "😂", label: "Laugh", category: "laughter" },
+  { emoji: "💀", label: "Dead", category: "laughter" },
+  { emoji: "🤯", label: "Mindblown", category: "laughter" },
+  { emoji: "😱", label: "Shock", category: "laughter" },
+  { emoji: "👀", label: "Watching", category: "laughter" },
+  { emoji: "🕺", label: "Dance", category: "laughter" },
+
+  // Emotion & Love
+  { emoji: "❤️", label: "Heart", category: "emotion" },
+  { emoji: "💖", label: "Sparkle Heart", category: "emotion" },
+  { emoji: "😭", label: "Cry", category: "emotion" },
+  { emoji: "🤩", label: "Star Eyes", category: "emotion" },
+  { emoji: "🙌", label: "Praise", category: "emotion" },
+  { emoji: "🫡", label: "Salute", category: "emotion" },
+
+  // Celebration & Vibes
+  { emoji: "🎉", label: "Party", category: "celebrate" },
+  { emoji: "🥳", label: "Celebrate", category: "celebrate" },
+  { emoji: "👏", label: "Applause", category: "celebrate" },
+  { emoji: "💃", label: "Groove", category: "celebrate" },
+  { emoji: "🍻", label: "Cheers", category: "celebrate" },
+  { emoji: "✨", label: "Magic", category: "celebrate" },
+];
+
 interface FloatingParticle {
   id: number;
   emoji: string;
@@ -18,16 +58,16 @@ export const ReactionsOverlay: React.FC<ReactionsOverlayProps> = ({ activeReacti
   useEffect(() => {
     if (!activeReaction) return;
 
-    // Spawn 5 particles with staggered positions for a festive burst
+    // Spawn 5 particles with staggered positions for a vibrant burst
     const newParticles: FloatingParticle[] = Array.from({ length: 5 }).map((_, i) => ({
       id: Date.now() + Math.random(),
       emoji: activeReaction.emoji,
-      left: 70 + (Math.random() * 25 - 12), // clustered on bottom-right
-      size: Math.floor(28 + Math.random() * 20),
-      duration: 2.2 + Math.random() * 0.8,
+      left: 70 + (Math.random() * 26 - 13), // clustered nicely on right
+      size: Math.floor(28 + Math.random() * 22),
+      duration: 2.2 + Math.random() * 0.9,
     }));
 
-    setParticles((prev) => [...prev, ...newParticles]);
+    setParticles((prev) => [...prev.slice(-30), ...newParticles]);
 
     const timer = setTimeout(() => {
       setParticles((prev) => prev.filter((p) => !newParticles.some((np) => np.id === p.id)));

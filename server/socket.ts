@@ -61,6 +61,15 @@ export function initWebSocketServer(server: HttpServer) {
   const roomSockets = new Map<string, Set<WebSocket>>();
   const roomMembers = new Map<string, Map<number, RoomUserRecord>>();
   const roomQueues = new Map<string, any[]>();
+  const roomPlaybackState = new Map<
+    string,
+    {
+      isPlaying: boolean;
+      position: number;
+      updatedAt: number;
+      sequence: number;
+    }
+  >();
 
   const broadcastToRoom = (
     roomCode: string,
@@ -151,7 +160,16 @@ export function initWebSocketServer(server: HttpServer) {
     if (isExplicitLeave) {
       // User explicitly clicked "Leave Party"
       db.getRoomByCode(roomCode).then(r => {
-        if (r) db.recordMemberLeave(r.id, userId);
+        if (r) {
+          db.recordMemberLeave(r.id, userId);
+          db.updateRoomViewerCount(r.id, Math.max(0, users.size - 1));
+        }
+      }).catch(() => {});
+      db.updateUserLiveActivity(userId, {
+        isOnline: true,
+        currentRoomCode: null,
+        currentActivityTitle: null,
+        currentActivityPlatform: null,
       }).catch(() => {});
 
       if (userRecord.disconnectTimeout) {
@@ -162,6 +180,7 @@ export function initWebSocketServer(server: HttpServer) {
       if (users.size === 0) {
         roomMembers.delete(roomCode);
         roomSockets.delete(roomCode);
+        roomPlaybackState.delete(roomCode);
       }
 
       broadcastToRoom(roomCode, {
@@ -203,16 +222,27 @@ export function initWebSocketServer(server: HttpServer) {
 
     userRecord.disconnectTimeout = setTimeout(() => {
       // Grace period expired without reconnection!
+      const currentUsers = roomMembers.get(roomCode);
+      const remainingCount = currentUsers && currentUsers.has(userId) ? Math.max(0, currentUsers.size - 1) : 0;
       db.getRoomByCode(roomCode).then(r => {
-        if (r) db.recordMemberLeave(r.id, userId);
+        if (r) {
+          db.recordMemberLeave(r.id, userId);
+          db.updateRoomViewerCount(r.id, remainingCount);
+        }
+      }).catch(() => {});
+      db.updateUserLiveActivity(userId, {
+        isOnline: false,
+        currentRoomCode: null,
+        currentActivityTitle: null,
+        currentActivityPlatform: null,
       }).catch(() => {});
 
-      const currentUsers = roomMembers.get(roomCode);
       if (currentUsers && currentUsers.get(userId) === userRecord) {
         currentUsers.delete(userId);
         if (currentUsers.size === 0) {
           roomMembers.delete(roomCode);
           roomSockets.delete(roomCode);
+          roomPlaybackState.delete(roomCode);
         }
 
         broadcastToRoom(roomCode, {
@@ -327,6 +357,13 @@ export function initWebSocketServer(server: HttpServer) {
           }
 
           await db.recordMemberJoin(room.id, userId, session.role);
+          db.updateRoomViewerCount(room.id, users.size).catch(() => {});
+          db.updateUserLiveActivity(userId, {
+            isOnline: true,
+            currentRoomCode: roomCode,
+            currentActivityTitle: room.title,
+            currentActivityPlatform: room.platform,
+          }).catch(() => {});
 
           let isFirstJoin = false;
           let userRecord = users.get(userId);
@@ -367,12 +404,26 @@ export function initWebSocketServer(server: HttpServer) {
             users.set(userId, userRecord);
           }
 
-          // Calculate projected playback position
+          // Authoritative Force Sync 2.0 projected playback position
           const now = Date.now();
-          const elapsed = (now - new Date(room.positionUpdatedAt).getTime()) / 1000;
-          const projectedPosition = room.isPlaying
-            ? room.currentPosition + Math.max(0, elapsed)
-            : room.currentPosition;
+          let pState = roomPlaybackState.get(roomCode);
+          if (!pState) {
+            const elapsed = (now - new Date(room.positionUpdatedAt).getTime()) / 1000;
+            const currentPosition = room.isPlaying
+              ? room.currentPosition + Math.max(0, elapsed)
+              : room.currentPosition;
+            pState = {
+              isPlaying: room.isPlaying,
+              position: currentPosition,
+              updatedAt: now,
+              sequence: 1,
+            };
+            roomPlaybackState.set(roomCode, pState);
+          }
+
+          const projectedPosition = pState.isPlaying
+            ? pState.position + Math.max(0, (now - pState.updatedAt) / 1000)
+            : pState.position;
 
           // Send current state to newly connected client
           ws.send(
@@ -380,7 +431,9 @@ export function initWebSocketServer(server: HttpServer) {
               type: "room_state",
               room: {
                 ...room,
+                isPlaying: pState.isPlaying,
                 currentPosition: projectedPosition,
+                sequence: pState.sequence,
                 serverTime: now,
               },
               yourPeerId: session.peerId,
@@ -448,11 +501,12 @@ export function initWebSocketServer(server: HttpServer) {
         if (!room) return;
 
         if (type === "playback_event") {
-          const { eventType, position } = data;
+          const { eventType, position, source } = data;
           const isHost = session.role === "host";
 
           // If host-only controls are enabled, verify permission
-          if (room.settings?.hostOnlyControls && !isHost) {
+          const isHostOnly = room.hostOnlyPlayback || room.settings?.hostOnlyControls;
+          if (isHostOnly && !isHost) {
             ws.send(
               JSON.stringify({
                 type: "error",
@@ -462,11 +516,23 @@ export function initWebSocketServer(server: HttpServer) {
             return;
           }
 
+          let pState = roomPlaybackState.get(roomCode);
+          const currentSeq = (pState?.sequence || 0) + 1;
+
           let isPlaying = room.isPlaying;
           if (eventType === "play") isPlaying = true;
           if (eventType === "pause") isPlaying = false;
 
           const safePosition = Math.max(0, Number(position) || 0);
+          const serverTime = Date.now();
+
+          roomPlaybackState.set(roomCode, {
+            isPlaying,
+            position: safePosition,
+            updatedAt: serverTime,
+            sequence: currentSeq,
+          });
+
           await db.updateRoomPlayback(room.id, isPlaying, safePosition);
           await db.recordPlaybackEvent({
             roomId: room.id,
@@ -475,13 +541,14 @@ export function initWebSocketServer(server: HttpServer) {
             position: safePosition,
           });
 
-          const serverTime = Date.now();
           broadcastToRoom(roomCode, {
             type: "playback_sync",
             eventType,
             position: safePosition,
             isPlaying,
+            sequence: currentSeq,
             serverTime,
+            source: source || (session.role === "host" ? "HOST_COMMAND" : "PARTICIPANT_CORRECTION"),
             initiatedBy: session.userName,
           });
           return;
@@ -524,13 +591,69 @@ export function initWebSocketServer(server: HttpServer) {
         }
 
         if (type === "reaction") {
-          if (!room.settings?.allowReactions) return;
+          if (room.settings && room.settings.allowReactions === false) return;
           const emoji = String(data.emoji || "🔥");
+          const label = String(data.label || "");
           broadcastToRoom(roomCode, {
             type: "reaction",
             emoji,
+            label,
             senderName: session.userName,
             senderPeerId: session.peerId,
+            id: Date.now() + Math.random(),
+          });
+          return;
+        }
+
+        if (type === "join_request") {
+          const message = String(data.message || "").trim();
+          const req = await db.createJoinRequest(roomCode, session.userId);
+
+          const sockets = roomSockets.get(roomCode);
+          if (sockets) {
+            for (const s of sockets) {
+              const client = clients.get(s);
+              if (client && client.role === "host" && s.readyState === WebSocket.OPEN) {
+                s.send(
+                  JSON.stringify({
+                    type: "join_request_received",
+                    requestId: req.id,
+                    userId: session.userId,
+                    userName: session.userName,
+                    avatarColor: session.avatarColor,
+                    message,
+                    requestedAt: new Date().toISOString(),
+                  })
+                );
+              }
+            }
+          }
+          return;
+        }
+
+        if (type === "join_request_response") {
+          if (session.role !== "host") return;
+          const requestId = Number(data.requestId);
+          const approved = Boolean(data.approved);
+          const targetUserId = Number(data.targetUserId);
+
+          await db.respondJoinRequest(requestId, approved ? "approved" : "rejected");
+
+          wss.clients.forEach((clientWs) => {
+            const clientSession = clients.get(clientWs);
+            if (clientSession && clientSession.userId === targetUserId && clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(
+                JSON.stringify({
+                  type: "join_approval_result",
+                  requestId,
+                  approved,
+                  roomCode,
+                  message: approved
+                    ? "Host approved your join request!"
+                    : "Host declined your join request.",
+                })
+              );
+            }
           });
           return;
         }
@@ -771,16 +894,38 @@ export function initWebSocketServer(server: HttpServer) {
     });
   });
 
-  // Heartbeat to keep connections healthy
-  const interval = setInterval(() => {
+  // Ping to keep connections healthy
+  const pingInterval = setInterval(() => {
     wss.clients.forEach((ws: WebSocket) => {
       if (ws.readyState !== WebSocket.OPEN) return;
       ws.ping();
     });
   }, 30000);
 
+  // Force Sync Engine 2.0 authoritative periodic heartbeat
+  const syncHeartbeatInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [code, state] of roomPlaybackState.entries()) {
+      const sockets = roomSockets.get(code);
+      if (!sockets || sockets.size === 0) continue;
+      if (!state.isPlaying) continue;
+
+      const elapsed = Math.max(0, (now - state.updatedAt) / 1000);
+      const projectedPos = state.position + elapsed;
+
+      broadcastToRoom(code, {
+        type: "sync_heartbeat",
+        position: projectedPos,
+        isPlaying: true,
+        sequence: state.sequence,
+        serverTime: now,
+      });
+    }
+  }, 15000);
+
   wss.on("close", () => {
-    clearInterval(interval);
+    clearInterval(pingInterval);
+    clearInterval(syncHeartbeatInterval);
   });
 
   console.log("[WebSocket] Real-time engine mounted on /api/ws");

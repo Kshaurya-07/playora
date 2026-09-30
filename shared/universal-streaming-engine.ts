@@ -735,3 +735,78 @@ export function projectPosition(
   if (!isPlaying) return Math.max(0, position);
   return Math.max(0, position + Math.max(0, elapsedSeconds));
 }
+
+export interface ForceSyncCorrection {
+  driftMs: number;
+  driftSeconds: number;
+  tier: "ignore" | "gentle_nudge" | "strong_nudge" | "controlled_seek" | "hard_sync";
+  suggestedPlaybackRate: number;
+  requiresSeek: boolean;
+  targetPosition: number;
+}
+
+export function computeForceSyncCorrection(
+  localPos: number,
+  authoritativePos: number
+): ForceSyncCorrection {
+  const driftSeconds = localPos - authoritativePos;
+  const driftMs = Math.round(driftSeconds * 1000);
+  const absMs = Math.abs(driftMs);
+
+  if (absMs < 150) {
+    return {
+      driftMs,
+      driftSeconds,
+      tier: "ignore",
+      suggestedPlaybackRate: 1.0,
+      requiresSeek: false,
+      targetPosition: authoritativePos,
+    };
+  }
+
+  if (absMs <= 400) {
+    // Gentle nudge: behind -> speed up 1.03x; ahead -> slow down 0.97x
+    return {
+      driftMs,
+      driftSeconds,
+      tier: "gentle_nudge",
+      suggestedPlaybackRate: driftSeconds < 0 ? 1.03 : 0.97,
+      requiresSeek: false,
+      targetPosition: authoritativePos,
+    };
+  }
+
+  if (absMs <= 1000) {
+    // Strong nudge: behind -> speed up 1.08x; ahead -> slow down 0.92x
+    return {
+      driftMs,
+      driftSeconds,
+      tier: "strong_nudge",
+      suggestedPlaybackRate: driftSeconds < 0 ? 1.08 : 0.92,
+      requiresSeek: false,
+      targetPosition: authoritativePos,
+    };
+  }
+
+  if (absMs <= 2000) {
+    // Controlled seek without pause
+    return {
+      driftMs,
+      driftSeconds,
+      tier: "controlled_seek",
+      suggestedPlaybackRate: 1.0,
+      requiresSeek: true,
+      targetPosition: authoritativePos,
+    };
+  }
+
+  // Hard sync: immediate jump and state align
+  return {
+    driftMs,
+    driftSeconds,
+    tier: "hard_sync",
+    suggestedPlaybackRate: 1.0,
+    requiresSeek: true,
+    targetPosition: authoritativePos,
+  };
+}

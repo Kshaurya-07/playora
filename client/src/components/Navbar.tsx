@@ -16,6 +16,7 @@ import {
   Activity,
   Users,
   Settings,
+  Globe,
 } from "lucide-react";
 
 export function Navbar() {
@@ -51,6 +52,18 @@ export function Navbar() {
             >
               <LayoutDashboard size={16} />
               <span>Dashboard</span>
+            </Link>
+
+            <Link
+              href="/world"
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                location === "/world"
+                  ? "bg-white/10 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Globe size={16} className="text-[#d6ff3f]" />
+              <span>World</span>
             </Link>
 
             <Link
@@ -204,6 +217,17 @@ export function Navbar() {
           >
             <LayoutDashboard size={18} />
             <span>Dashboard</span>
+          </Link>
+
+          <Link
+            href="/world"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${
+              location === "/world" ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Globe size={18} className="text-[#d6ff3f]" />
+            <span>World Discovery</span>
           </Link>
 
           <Link

@@ -36,6 +36,7 @@ import {
   History as HistoryIcon,
   ShieldCheck,
   RotateCcw,
+  Globe,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -105,6 +106,15 @@ export default function Dashboard() {
     enabled: Boolean(user?.id),
   });
 
+  const { data: friendsActivity } = trpc.friend.getFriendsActivity.useQuery(undefined, {
+    refetchInterval: 10000,
+    enabled: Boolean(user?.id),
+  });
+
+  const { data: worldStats } = trpc.world.getStats.useQuery(undefined, {
+    refetchInterval: 15000,
+  });
+
   // Mutations
   const createPartyMutation = trpc.party.create.useMutation({
     onSuccess: (room) => {
@@ -114,19 +124,7 @@ export default function Dashboard() {
       setLocation(`/party/${room.code}`);
     },
     onError: (err) => {
-      const rawMsg = err.message || "";
-      if (
-        rawMsg.includes("Zero-length key") ||
-        rawMsg.includes("security configuration") ||
-        rawMsg.includes("JWT_SECRET")
-      ) {
-        toast.error("Unable to create party", {
-          description:
-            "The server security configuration is incomplete. Please check the PlayOra server environment configuration.",
-        });
-      } else {
-        toast.error(rawMsg || "Failed to create party");
-      }
+      toast.error(err.message || "Failed to create party");
     },
   });
 
@@ -158,14 +156,7 @@ export default function Dashboard() {
       title: partyTitle.trim(),
       platform: selectedPlatform,
       contentUrl: contentUrl.trim(),
-      hostName: user?.name || profileName || "Party Host",
-      settings: {
-        hostOnlyControls,
-        lockSeeking: false,
-        allowReactions: true,
-        allowVoice: true,
-        isPublic: true,
-      },
+      hostOnlyPlayback: hostOnlyControls,
     });
   };
 
@@ -511,6 +502,74 @@ export default function Dashboard() {
                   </Link>
                 )}
               </div>
+            </div>
+
+            {/* Friends Activity Card */}
+            <div className="rounded-2xl border border-white/[.08] bg-[#11141c] p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                  <Users size={14} className="text-[#d6ff3f]" />
+                  Friends Activity
+                </h4>
+                <Link href="/friends" className="text-[11px] text-[#d6ff3f] hover:underline font-semibold">
+                  View All
+                </Link>
+              </div>
+
+              {!friendsActivity || friendsActivity.length === 0 ? (
+                <div className="rounded-xl bg-white/[0.02] p-4 text-center text-xs text-neutral-500">
+                  No friends active right now. Add friends to watch together!
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {friendsActivity.slice(0, 4).map((item) => (
+                    <div key={item.friend.id} className="flex items-center justify-between rounded-xl bg-white/[0.02] p-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                        <div
+                          className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-black shrink-0"
+                          style={{ backgroundColor: item.friend.avatarColor || "#D6FF3F" }}
+                        >
+                          {(item.friend.name || "U").charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">{item.friend.name || "Friend"}</p>
+                          <p className="text-[10px] text-zinc-400 truncate">
+                            {(item.status === "IN_PARTY" || item.status === "WATCHING") && item.activity ? (
+                              <span className="text-[#d6ff3f]">Watching {item.activity.roomTitle || "stream"}</span>
+                            ) : (
+                              <span className="text-zinc-500">Online</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      {item.activity?.roomCode && (
+                        <Link href={`/party/${item.activity.roomCode}`}>
+                          <Button size="sm" className="h-6 px-2 text-[10px] bg-[#d6ff3f] text-black font-bold rounded-lg hover:bg-[#c2eb30]">
+                            Join
+                          </Button>
+                        </Link>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* World Discovery Banner */}
+            <div className="rounded-2xl border border-white/[.08] bg-gradient-to-br from-[#121522] to-[#0c0d14] p-5 space-y-3">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <Globe size={16} className="text-[#d6ff3f]" />
+                <span>World Discovery</span>
+              </div>
+              <p className="text-xs text-neutral-400">
+                Explore {worldStats?.activeParties ?? 0} live watch parties happening around the world.
+              </p>
+              <Link href="/world" className="block">
+                <Button className="w-full h-8 text-xs font-bold bg-white/10 hover:bg-white/20 text-white rounded-xl">
+                  Explore World 🌍
+                </Button>
+              </Link>
             </div>
 
             {/* Platform Capabilities Overview */}

@@ -21,6 +21,13 @@ import {
   Tv,
   Film,
   Users,
+  Copy,
+  Ghost,
+  Eye,
+  EyeOff,
+  Lock,
+  Globe,
+  Settings,
 } from "lucide-react";
 
 export default function ProfilePage() {
@@ -29,7 +36,16 @@ export default function ProfilePage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.name || "");
+  const [username, setUsername] = useState((user as any)?.username || "");
+  const [bio, setBio] = useState((user as any)?.bio || "");
   const [avatarColor, setAvatarColor] = useState(user?.avatarColor || "#D6FF3F");
+  const [ghostMode, setGhostMode] = useState<boolean>(Boolean((user as any)?.ghostMode));
+  const [activityVisibility, setActivityVisibility] = useState<"public" | "friends" | "none">(
+    ((user as any)?.activityVisibility as "public" | "friends" | "none") || "friends"
+  );
+  const [allowFriendRequests, setAllowFriendRequests] = useState<boolean>(
+    (user as any)?.allowFriendRequests ?? true
+  );
 
   // Fetch account stats & history from backend
   const { data: stats, isLoading: loadingStats, refetch: refetchStats } =
@@ -39,7 +55,7 @@ export default function ProfilePage() {
 
   const updateProfileMutation = trpc.auth.updateProfile.useMutation({
     onSuccess: async () => {
-      toast.success("Profile updated successfully!");
+      toast.success("Profile & privacy settings updated!");
       setIsEditing(false);
       await refresh();
       refetchStats();
@@ -57,20 +73,40 @@ export default function ProfilePage() {
     }
     updateProfileMutation.mutate({
       name: displayName.trim(),
+      username: username.trim() || undefined,
+      bio: bio.trim() || undefined,
       avatarColor,
+      ghostMode,
+      activityVisibility,
+      allowFriendRequests,
     });
+  };
+
+  const handleToggleGhostMode = () => {
+    const nextVal = !ghostMode;
+    setGhostMode(nextVal);
+    updateProfileMutation.mutate({
+      ghostMode: nextVal,
+    });
+    toast.info(nextVal ? "Ghost Mode enabled: Activity hidden from friends" : "Ghost Mode disabled: Activity visible");
+  };
+
+  const copyPlayoraId = () => {
+    const id = (user as any)?.playoraId || (user as any)?.username || `u${user?.id}`;
+    navigator.clipboard.writeText(`@${id}`);
+    toast.success(`Copied @${id} to clipboard!`);
   };
 
   const isGoogle = user?.loginMethod === "google" || Boolean(user?.googleId);
   const avatarColors = ["#D6FF3F", "#4285F4", "#F43F5E", "#10B981", "#8B5CF6", "#F59E0B"];
 
   return (
-    <div className="min-h-screen bg-[#07090e] text-white flex flex-col pb-20 md:pb-10">
+    <div className="min-h-screen bg-[#050505] text-[#f3f5fa] flex flex-col pb-24 md:pb-12">
       <Navbar />
 
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Profile Card Header */}
-        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0d111b]/90 p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0d0e12] p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
           <div className="absolute top-0 right-0 w-72 h-72 bg-[#d6ff3f]/10 rounded-full blur-[90px] pointer-events-none" />
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 relative z-10">
@@ -83,7 +119,7 @@ export default function ProfilePage() {
                 />
               ) : (
                 <div
-                  className="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-black text-[#0a0d14] shadow-lg"
+                  className="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-black text-[#050505] shadow-lg"
                   style={{ backgroundColor: user?.avatarColor || avatarColor }}
                 >
                   {(user?.name || "U").charAt(0).toUpperCase()}
@@ -107,11 +143,27 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-                <p className="text-sm text-zinc-400">
-                  {user?.email || "No email linked (guest account)"}
-                </p>
+                {/* PlayOra ID with 1-click copy */}
+                <div className="flex items-center gap-2 pt-0.5">
+                  <button
+                    onClick={copyPlayoraId}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-xs font-mono font-bold text-[#d6ff3f] hover:bg-white/10 transition"
+                  >
+                    <span>@{ (user as any)?.playoraId || (user as any)?.username || `u${user?.id}` }</span>
+                    <Copy size={11} className="text-zinc-400" />
+                  </button>
+                  <span className="text-xs text-zinc-400">
+                    {user?.email || "No email linked"}
+                  </span>
+                </div>
 
-                <div className="flex items-center gap-2 text-xs text-zinc-400 pt-1">
+                {(user as any)?.bio && (
+                  <p className="text-xs text-zinc-300 pt-1 italic">
+                    "{(user as any).bio}"
+                  </p>
+                )}
+
+                <div className="flex items-center gap-2 text-xs text-zinc-500 pt-1">
                   <Calendar size={13} />
                   <span>
                     Member since {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : "Today"}
@@ -126,10 +178,12 @@ export default function ProfilePage() {
                 size="sm"
                 onClick={() => {
                   setDisplayName(user?.name || "");
+                  setUsername((user as any)?.username || "");
+                  setBio((user as any)?.bio || "");
                   setAvatarColor(user?.avatarColor || "#D6FF3F");
                   setIsEditing(!isEditing);
                 }}
-                className="flex-1 sm:flex-initial border-white/15 bg-white/5 hover:bg-white/10 text-white"
+                className="flex-1 sm:flex-initial border-white/15 bg-white/5 hover:bg-white/10 text-white rounded-xl"
               >
                 <Edit2 size={15} className="mr-1.5" />
                 <span>{isEditing ? "Cancel" : "Edit Profile"}</span>
@@ -138,168 +192,223 @@ export default function ProfilePage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  logout();
-                  setLocation("/login");
-                }}
-                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                onClick={() => logout()}
+                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl"
               >
-                <LogOut size={16} className="mr-1.5" />
-                <span>Sign Out</span>
+                <LogOut size={16} />
               </Button>
             </div>
           </div>
 
-          {/* Edit Profile Form Accordion */}
+          {/* Edit Profile Form */}
           {isEditing && (
-            <form onSubmit={handleSaveProfile} className="mt-6 pt-6 border-t border-white/10 space-y-4">
+            <form onSubmit={handleSaveProfile} className="mt-6 border-t border-white/10 pt-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-300">Display Name</label>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                    Display Name
+                  </label>
                   <Input
+                    type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
-                    className="bg-white/5 border-white/15 text-white focus:border-[#d6ff3f]"
-                    maxLength={32}
+                    className="mt-1 bg-black/40 border-white/10 text-white"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-300">Avatar Tone</label>
-                  <div className="flex items-center gap-2 pt-1.5">
-                    {avatarColors.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        onClick={() => setAvatarColor(color)}
-                        style={{ backgroundColor: color }}
-                        className={`h-8 w-8 rounded-full transition ${
-                          avatarColor === color ? "scale-110 ring-2 ring-white ring-offset-2 ring-offset-[#0d111b]" : "opacity-70 hover:opacity-100"
-                        }`}
-                      />
-                    ))}
-                  </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                    Username / Handle
+                  </label>
+                  <Input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="e.g. cyber_samurai"
+                    className="mt-1 bg-black/40 border-white/10 text-white font-mono text-xs"
+                  />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                  Bio / Status
+                </label>
+                <Input
+                  type="text"
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="e.g. Cinema enthusiast, Twitch chatter, EDM lover"
+                  className="mt-1 bg-black/40 border-white/10 text-white text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                  Avatar Accent Color
+                </label>
+                <div className="flex items-center gap-3 mt-2">
+                  {avatarColors.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setAvatarColor(color)}
+                      className={`h-8 w-8 rounded-full transition transform active:scale-95 ${
+                        avatarColor === color ? "ring-2 ring-white scale-110" : "opacity-80"
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsEditing(false)}
+                  className="text-zinc-400 hover:text-white"
+                >
+                  Cancel
+                </Button>
                 <Button
                   type="submit"
+                  size="sm"
                   disabled={updateProfileMutation.isPending}
-                  className="bg-[#d6ff3f] hover:bg-[#c2ea32] text-[#0a0d14] font-semibold"
+                  className="bg-[#d6ff3f] text-[#050505] font-bold hover:bg-[#c2eb30] rounded-xl px-5"
                 >
-                  <Check size={16} className="mr-1.5" />
-                  Save Changes
+                  {updateProfileMutation.isPending ? "Saving..." : "Save Changes"}
                 </Button>
               </div>
             </form>
           )}
         </div>
 
-        {/* Account Statistics Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-white/10 bg-[#0d111b]/80 p-5 backdrop-blur-md space-y-2">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="text-xs font-medium uppercase tracking-wider">Parties Hosted</span>
-              <Tv size={18} className="text-[#d6ff3f]" />
-            </div>
-            <div className="text-3xl font-extrabold text-white">
-              {stats?.hostedCount ?? (loadingStats ? "..." : 0)}
-            </div>
-            <p className="text-xs text-zinc-400">Total watch party rooms created</p>
-          </div>
+        {/* Privacy & Ghost Mode Controls */}
+        <div className="rounded-3xl border border-white/10 bg-[#0d0e12] p-6 space-y-4">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <Ghost size={18} className="text-[#d6ff3f]" />
+            Privacy & Social Visibility
+          </h2>
 
-          <div className="rounded-2xl border border-white/10 bg-[#0d111b]/80 p-5 backdrop-blur-md space-y-2">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="text-xs font-medium uppercase tracking-wider">Parties Joined</span>
-              <Users size={18} className="text-blue-400" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Ghost Mode Card */}
+            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
+              <div>
+                <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <Ghost size={15} className={ghostMode ? "text-[#d6ff3f]" : "text-zinc-500"} />
+                  Ghost Mode
+                </span>
+                <p className="text-xs text-zinc-400 mt-1 max-w-xs">
+                  Hide your online presence and current watch party activity from all friends.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleGhostMode}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                  ghostMode ? "bg-[#d6ff3f]" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-black transition ${
+                    ghostMode ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
             </div>
-            <div className="text-3xl font-extrabold text-white">
-              {stats?.joinedCount ?? (loadingStats ? "..." : 0)}
-            </div>
-            <p className="text-xs text-zinc-400">Sessions watched with friends</p>
-          </div>
 
-          <div className="rounded-2xl border border-white/10 bg-[#0d111b]/80 p-5 backdrop-blur-md space-y-2">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="text-xs font-medium uppercase tracking-wider">Live Right Now</span>
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
+            {/* Friend Requests Toggle */}
+            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
+              <div>
+                <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <Users size={15} className="text-blue-400" />
+                  Allow Friend Requests
+                </span>
+                <p className="text-xs text-zinc-400 mt-1 max-w-xs">
+                  Let other watchers send you friend requests and co-watching invites.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextVal = !allowFriendRequests;
+                  setAllowFriendRequests(nextVal);
+                  updateProfileMutation.mutate({ allowFriendRequests: nextVal });
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                  allowFriendRequests ? "bg-[#d6ff3f]" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-black transition ${
+                    allowFriendRequests ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
             </div>
-            <div className="text-3xl font-extrabold text-white">
-              {stats?.activeRooms?.length ?? 0}
-            </div>
-            <p className="text-xs text-zinc-400">Your currently active rooms</p>
           </div>
         </div>
 
-        {/* Quick Links & History Teaser */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <History size={18} className="text-[#d6ff3f]" />
-              <h2 className="text-lg font-bold text-white">Recent Watch Parties</h2>
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="rounded-2xl border border-white/10 bg-[#0d0e12] p-5">
+            <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+              <Radio size={14} className="text-[#d6ff3f]" /> Hosted Parties
+            </span>
+            <p className="text-2xl font-black text-white mt-1">
+              {stats?.hostedCount ?? 0}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-[#0d0e12] p-5">
+            <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+              <Users size={14} className="text-emerald-400" /> Parties Joined
+            </span>
+            <p className="text-2xl font-black text-white mt-1">
+              {stats?.joinedCount ?? 0}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-[#0d0e12] p-5">
+            <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+              <Film size={14} className="text-amber-400" /> Completed
+            </span>
+            <p className="text-2xl font-black text-white mt-1">
+              {stats?.completedCount ?? 0}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-[#0d0e12] p-5">
+            <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+              <Sparkles size={14} className="text-purple-400" /> Level
+            </span>
+            <p className="text-2xl font-black text-white mt-1">
+              {stats?.hostedCount && stats.hostedCount > 5 ? "Party Master" : "Watcher"}
+            </p>
+          </div>
+        </div>
+
+        {/* Google Authentication Connect if Guest */}
+        {!isGoogle && (
+          <div className="rounded-3xl border border-[#4285F4]/30 bg-[#4285F4]/5 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <ShieldCheck size={18} className="text-[#8ab4f8]" />
+                Link Your Google Account
+              </h3>
+              <p className="text-xs text-zinc-400 max-w-lg">
+                Link Google OAuth to preserve your friends list, watch party history, and custom handle across all devices.
+              </p>
             </div>
-            <Link
-              href="/history"
-              className="text-xs font-medium text-[#d6ff3f] hover:underline flex items-center gap-1"
-            >
-              <span>View Full History</span>
-              <ExternalLink size={13} />
+            <Link href="/login">
+              <Button className="bg-[#4285F4] text-white hover:bg-[#3367d6] rounded-xl font-bold text-xs h-10 px-5">
+                Sign In With Google
+              </Button>
             </Link>
           </div>
-
-          {stats?.historyRooms && stats.historyRooms.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {stats.historyRooms.slice(0, 4).map((room: any) => (
-                <div
-                  key={room.id}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-4 flex items-center justify-between hover:border-white/20 transition"
-                >
-                  <div className="space-y-1 min-w-0 pr-3">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/20 text-red-400">
-                        ENDED
-                      </span>
-                      <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">
-                        {room.platform}
-                      </span>
-                    </div>
-                    <h3 className="font-semibold text-sm text-white truncate">{room.title}</h3>
-                    <p className="text-xs text-zinc-400">
-                      Code: <span className="font-mono text-zinc-300 font-semibold">{room.code}</span>
-                      {room.endedAt && (
-                        <span> • {new Date(room.endedAt).toLocaleDateString()}</span>
-                      )}
-                    </p>
-                  </div>
-
-                  <Link href={`/party/${room.code}`}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-white/15 text-xs text-zinc-300 hover:text-white"
-                    >
-                      Recap
-                    </Button>
-                  </Link>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-8 text-center space-y-3">
-              <Film size={32} className="mx-auto text-zinc-600" />
-              <p className="text-sm text-zinc-400">You haven't participated in any watch parties yet.</p>
-              <Link href="/dashboard">
-                <Button size="sm" className="bg-[#d6ff3f] text-[#0a0d14] font-semibold">
-                  Start Your First Party
-                </Button>
-              </Link>
-            </div>
-          )}
-        </div>
+        )}
       </main>
 
       <MobileBottomNav />

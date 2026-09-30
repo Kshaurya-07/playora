@@ -5,25 +5,25 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #0a0b0f;
+  --background: #050505;
   --foreground: #f3f5fa;
-  --card: #11131a;
+  --card: #0d0e12;
   --card-foreground: #f3f5fa;
-  --popover: #161923;
+  --popover: #121318;
   --popover-foreground: #f3f5fa;
   --primary: #d6ff3f;
-  --primary-foreground: #131711;
-  --secondary: #1c202a;
+  --primary-foreground: #050505;
+  --secondary: #16171d;
   --secondary-foreground: #f3f5fa;
-  --muted: #191c25;
+  --muted: #14151a;
   --muted-foreground: #8a91a3;
-  --accent: #262b37;
+  --accent: #1e2028;
   --accent-foreground: #f3f5fa;
-  --destructive: #ff6d6d;
-  --border: rgba(255,255,255,.09);
-  --input: rgba(255,255,255,.11);
+  --destructive: #ff5252;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
   --ring: #d6ff3f;
-  --radius: .9rem;
+  --radius: 0.9rem;
 }
 
 @theme inline {
@@ -72,9 +72,9 @@ button { cursor: pointer; }
 .playora-shell {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 75% -10%, rgba(73, 93, 151, .19), transparent 34rem),
-    radial-gradient(circle at 4% 18%, rgba(214, 255, 63, .06), transparent 28rem),
-    #0a0b0f;
+    radial-gradient(circle at 75% -10%, rgba(73, 93, 151, .14), transparent 34rem),
+    radial-gradient(circle at 4% 18%, rgba(214, 255, 63, .05), transparent 28rem),
+    #050505;
 }
 
 .noise-overlay {

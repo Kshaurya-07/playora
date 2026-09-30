@@ -126,14 +126,7 @@ export default function CreatePartyPage() {
       title: partyTitle.trim(),
       platform: selectedPlatform,
       contentUrl: contentUrl.trim(),
-      hostName: user?.name || "Party Host",
-      settings: {
-        hostOnlyControls,
-        lockSeeking: false,
-        allowReactions: true,
-        allowVoice: true,
-        isPublic: true,
-      },
+      hostOnlyPlayback: hostOnlyControls,
     });
   };
 

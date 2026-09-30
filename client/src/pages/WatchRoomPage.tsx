@@ -19,13 +19,14 @@ import { AssistedSyncAdapter } from "@/components/adapters/AssistedSyncAdapter";
 import { AdapterDiagnostics } from "@/components/adapters/types";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ParticipantsPanel } from "@/components/ParticipantsPanel";
-import { ReactionsOverlay } from "@/components/ReactionsOverlay";
+import { ReactionsOverlay, AVAILABLE_REACTIONS } from "@/components/ReactionsOverlay";
 import { SyncStatusIndicator } from "@/components/SyncStatusIndicator";
 import { CountdownModal } from "@/components/CountdownModal";
 import { DiagnosticsModal } from "@/components/DiagnosticsModal";
 import { HostControlCenter } from "@/components/HostControlCenter";
 import { PartyQueueModal } from "@/components/PartyQueueModal";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   Waves,
@@ -48,6 +49,10 @@ import {
   PhoneOff,
   LogOut,
   Radio,
+  Lock,
+  Smile,
+  Check,
+  ShieldAlert,
 } from "lucide-react";
 
 function formatDuration(startedAt?: Date | string | null, endedAt?: Date | string | null) {
@@ -137,6 +142,8 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     queue,
     roomContent,
     roomSettings,
+    pendingJoinApproval,
+    incomingJoinRequests,
     calculateDrift,
     broadcastPlayback,
     sendChatMessage,
@@ -154,6 +161,8 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     updateSettings,
     leaveRoom,
     endParty,
+    requestJoinApproval,
+    respondToJoinRequest,
   } = useRoomSocket({
     roomCode: cleanCode,
     user: socketUser,
@@ -197,6 +206,27 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     }, [updateVoiceState]),
   });
   voiceChatRef.current = voiceChat;
+
+  // Access Control & 24+ Reactions States
+  const [isPasswordUnlocked, setIsPasswordUnlocked] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [joinRequestMessage, setJoinRequestMessage] = useState("");
+  const [joinRequestSent, setJoinRequestSent] = useState(false);
+
+  const verifyPasswordMutation = trpc.party.verifyPassword.useMutation({
+    onSuccess: (res) => {
+      if (res.valid || res.success) {
+        setIsPasswordUnlocked(true);
+        toast.success("Password verified! Entering watch party...");
+      } else {
+        toast.error("Incorrect party password.");
+      }
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to verify password");
+    },
+  });
 
   // End Party & Leave Party Mutations
   const endPartyMutation = trpc.party.end.useMutation({
@@ -531,6 +561,107 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
     );
   }
 
+  // Access Control: Password Gate
+  const isRoomHost = room?.hostId === user?.id || role === "host";
+  const requiresPassword =
+    (room?.accessMode === "password" || (room as any)?.hasPassword) &&
+    !isRoomHost &&
+    !isPasswordUnlocked;
+
+  if (requiresPassword) {
+    return (
+      <div className="playora-shell flex min-h-screen flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#0d0e12] p-8 shadow-2xl space-y-6 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+            <Lock size={30} />
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="font-mono text-xs font-bold text-[#d6ff3f] px-2 py-0.5 rounded-md bg-[#d6ff3f]/10 border border-[#d6ff3f]/20">
+              {cleanCode}
+            </span>
+            <h2 className="text-xl font-black text-white">{room?.title || "Protected Watch Party"}</h2>
+            <p className="text-xs text-zinc-400">
+              This party is password-protected. Enter the room password to participate.
+            </p>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!passwordInput.trim()) return;
+              verifyPasswordMutation.mutate({ code: cleanCode, password: passwordInput.trim() });
+            }}
+            className="space-y-4"
+          >
+            <Input
+              type="password"
+              autoFocus
+              placeholder="Enter room password..."
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              className="h-11 bg-black/40 border-white/10 text-white text-center text-sm"
+            />
+
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setLocation("/world")}
+                className="flex-1 h-10 border-white/10 text-xs text-zinc-400 hover:text-white rounded-xl"
+              >
+                Back to World
+              </Button>
+              <Button
+                type="submit"
+                disabled={verifyPasswordMutation.isPending || !passwordInput.trim()}
+                className="flex-1 h-10 bg-[#d6ff3f] text-[#050505] font-bold text-xs hover:bg-[#c2eb30] rounded-xl"
+              >
+                {verifyPasswordMutation.isPending ? "Verifying..." : "Unlock Room"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Access Control: Waiting for Host Approval Screen
+  if (pendingJoinApproval) {
+    return (
+      <div className="playora-shell flex min-h-screen flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#0d0e12] p-8 shadow-2xl space-y-6 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-400">
+            <ShieldAlert size={30} className="animate-pulse" />
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="font-mono text-xs font-bold text-[#d6ff3f] px-2 py-0.5 rounded-md bg-[#d6ff3f]/10 border border-[#d6ff3f]/20">
+              {cleanCode}
+            </span>
+            <h2 className="text-xl font-black text-white">Waiting for Host Approval</h2>
+            <p className="text-xs text-zinc-400">
+              Your request to join has been delivered to the host. You'll enter automatically once approved.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-center gap-2 text-xs text-[#d6ff3f]">
+            <Waves size={16} className="animate-spin" />
+            <span>Standing by for approval...</span>
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={() => setLocation("/dashboard")}
+            className="w-full h-10 border-white/10 text-xs text-zinc-400 hover:text-white rounded-xl"
+          >
+            Cancel & Return to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="playora-shell flex min-h-screen flex-col overflow-hidden">
       <div className="noise-overlay" />
@@ -839,6 +970,56 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
       <main className="relative z-10 mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-3 p-3 lg:grid lg:grid-cols-[1fr_360px] lg:p-4 min-h-0">
         {/* Left: Video Player Surface */}
         <section className="flex flex-col min-w-0">
+          {/* Host Incoming Join Requests Alert Banner */}
+          {isHost && incomingJoinRequests.length > 0 && (
+            <div className="mb-3 space-y-2">
+              {incomingJoinRequests.map((req) => (
+                <div
+                  key={req.requestId}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3.5 backdrop-blur-md shadow-lg"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold text-black text-sm"
+                      style={{ backgroundColor: req.avatarColor || "#38bdf8" }}
+                    >
+                      {req.userName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">{req.userName}</span>
+                        <span className="text-[10px] font-semibold text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded">
+                          Requests Entry
+                        </span>
+                      </div>
+                      {req.message && (
+                        <p className="text-xs text-zinc-300 italic mt-0.5">"{req.message}"</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button
+                      size="sm"
+                      onClick={() => respondToJoinRequest(req.requestId, false, req.userId)}
+                      variant="outline"
+                      className="h-8 rounded-lg border-white/10 bg-white/5 text-xs text-zinc-400 hover:text-white"
+                    >
+                      <X size={14} className="mr-1" /> Decline
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => respondToJoinRequest(req.requestId, true, req.userId)}
+                      className="h-8 rounded-lg bg-[#d6ff3f] text-[#050505] text-xs font-bold hover:bg-[#c2eb30]"
+                    >
+                      <Check size={14} className="mr-1" /> Approve
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
             {renderAdapter()}
           </div>
@@ -880,17 +1061,81 @@ export const WatchRoomPage: React.FC<WatchRoomPageProps> = ({ code }) => {
               )}
             </div>
 
-            {/* Quick Reactions Bar */}
-            <div className="flex items-center gap-1">
+            {/* Reactions Bar with 24+ Reaction Picker */}
+            <div className="relative flex items-center gap-1">
               {["❤️", "😂", "🔥", "👏", "🍿"].map((emoji) => (
                 <button
                   key={emoji}
                   onClick={() => sendReaction(emoji)}
-                  className="btn-press rounded-md px-2 py-1 text-sm hover:bg-white/10"
+                  className="btn-press rounded-lg px-2 py-1 text-base hover:bg-white/10 transition-colors"
+                  title={`React ${emoji}`}
                 >
                   {emoji}
                 </button>
               ))}
+
+              <button
+                onClick={() => setShowReactionPicker(!showReactionPicker)}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors ${
+                  showReactionPicker
+                    ? "bg-[#d6ff3f] text-black"
+                    : "bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white"
+                }`}
+                title="Open 24+ Reaction Picker"
+              >
+                <Smile size={14} />
+                <span className="hidden sm:inline">24+</span>
+              </button>
+
+              {/* 24+ Categorized Reaction Popover */}
+              {showReactionPicker && (
+                <div className="absolute bottom-11 right-0 z-50 w-72 rounded-2xl border border-white/15 bg-[#0e1017] p-3 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Sparkles size={12} className="text-[#d6ff3f]" /> Floating Reactions
+                    </span>
+                    <button
+                      onClick={() => setShowReactionPicker(false)}
+                      className="text-zinc-400 hover:text-white p-0.5 rounded-md hover:bg-white/10"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5 pt-2 max-h-64 overflow-y-auto pr-1">
+                    {(["hype", "laughter", "emotion", "celebrate"] as const).map((cat) => {
+                      const catReactions = AVAILABLE_REACTIONS.filter((r) => r.category === cat);
+                      const catLabels = {
+                        hype: "⚡ Hype & Energy",
+                        laughter: "😂 Laughter & Fun",
+                        emotion: "💖 Emotion & Love",
+                        celebrate: "🎉 Celebration",
+                      };
+                      return (
+                        <div key={cat} className="space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            {catLabels[cat]}
+                          </div>
+                          <div className="grid grid-cols-6 gap-1">
+                            {catReactions.map((r) => (
+                              <button
+                                key={r.label}
+                                onClick={() => {
+                                  sendReaction(r.emoji);
+                                }}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg text-lg hover:bg-white/10 transition-transform active:scale-125"
+                                title={r.label}
+                              >
+                                {r.emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

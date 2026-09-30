@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { LayoutDashboard, Radio, History, User } from "lucide-react";
+import { LayoutDashboard, Radio, History, User, Globe, Users } from "lucide-react";
 
 export function MobileBottomNav() {
   const [location] = useLocation();
@@ -20,6 +20,12 @@ export function MobileBottomNav() {
       active: location === "/dashboard" || location === "/",
     },
     {
+      label: "World",
+      href: "/world",
+      icon: Globe,
+      active: location === "/world",
+    },
+    {
       label: "Active",
       href: "/parties",
       icon: Radio,
@@ -27,10 +33,10 @@ export function MobileBottomNav() {
       badge: true,
     },
     {
-      label: "History",
-      href: "/history",
-      icon: History,
-      active: location === "/history",
+      label: "Friends",
+      href: "/friends",
+      icon: Users,
+      active: location === "/friends",
     },
     {
       label: "Profile",
