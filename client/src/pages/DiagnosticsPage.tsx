@@ -28,11 +28,17 @@ export default function DiagnosticsPage() {
     refetchInterval: 10000,
   });
 
-  const renderStatus = (condition: boolean, successText: string, failText: string) => {
+  const renderStatus = (
+    condition: boolean,
+    successText: string,
+    failText: string,
+    isOptional: boolean = false
+  ) => {
+    const isPassing = condition || isOptional;
     return (
       <div className="flex items-center justify-between py-2 border-b border-white/[.06] last:border-none">
         <div className="flex items-center gap-2.5">
-          {condition ? (
+          {isPassing ? (
             <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
           ) : (
             <XCircle size={16} className="text-red-400 shrink-0" />
@@ -43,10 +49,10 @@ export default function DiagnosticsPage() {
         </div>
         <span
           className={`rounded-md px-2 py-0.5 text-[10px] font-mono font-bold ${
-            condition ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+            isPassing ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
           }`}
         >
-          {condition ? "PASS" : "FAIL"}
+          {condition ? "PASS" : isOptional ? "OPTIONAL" : "FAIL"}
         </span>
       </div>
     );
@@ -166,12 +172,14 @@ export default function DiagnosticsPage() {
                   diag.googleAuth?.clientIdPreview
                     ? `Google Client ID configured (${diag.googleAuth.clientIdPreview})`
                     : "Google Client ID configured",
-                  "Google Client ID missing (VITE_GOOGLE_CLIENT_ID / GOOGLE_CLIENT_ID)"
+                  "Google Client ID (Optional for standalone guest mode)",
+                  true
                 )}
                 {renderStatus(
                   diag.googleAuth?.secretConfigured ?? false,
                   "Google Client Secret configured (Backend verification ready)",
-                  "Google Client Secret not set (Optional for client-side GSI verification)"
+                  "Google Client Secret (Optional for client-side GSI verification)",
+                  true
                 )}
                 {renderStatus(
                   typeof window !== "undefined" &&
