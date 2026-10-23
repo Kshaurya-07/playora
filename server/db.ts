@@ -1095,6 +1095,7 @@ export async function searchUsers(query: string, currentUserId?: number): Promis
   if (!db) return memoryStore.searchUsers(query, currentUserId);
 
   try {
+    const safeQ = q.replace(/[%_\\]/g, "\\$&");
     const result = await db
       .select()
       .from(users)
@@ -1103,9 +1104,9 @@ export async function searchUsers(query: string, currentUserId?: number): Promis
           currentUserId ? sql`${users.id} != ${currentUserId}` : sql`1=1`,
           sql`${users.profileVisibility} != 'private'`,
           or(
-            like(users.name, `%${q}%`),
-            like(users.username, `%${q}%`),
-            like(users.playoraId, `%${q}%`)
+            like(users.name, `%${safeQ}%`),
+            like(users.username, `%${safeQ}%`),
+            like(users.playoraId, `%${safeQ}%`)
           )
         )
       )

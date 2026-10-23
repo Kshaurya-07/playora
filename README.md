@@ -73,6 +73,46 @@ PlayOra auto-detects pasted URLs and selects the optimal playback adapter:
 
 ---
 
+## 🏗️ System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       PLAYORA CLIENT                        │
+│  React 19 · TypeScript · Vite · Tailwind · Radix · Wouter   │
+└──────────────┬───────────────────────────────┬──────────────┘
+               │ HTTP / tRPC                   │ WebSocket (/api/ws)
+               ▼                               ▼
+┌──────────────────────────────┐   ┌──────────────────────────┐
+│      tRPC 11 API SERVER      │   │  REAL-TIME SOCKET ENGINE │
+│  Auth · Room · Friend · World│   │  Signaling · Mesh · Sync │
+└──────────────┬───────────────┘   └───────────┬──────────────┘
+               │                               │
+               ▼                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 DUAL-MODE PERSISTENCE LAYER                 │
+│  MySQL (Drizzle ORM) ⇄ Zero-Config MemoryStore Fallback     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📡 Real-Time WebSocket Protocol (`/api/ws`)
+
+| Event Type | Direction | Payload Description |
+| :--- | :---: | :--- |
+| `join_room` | Client $\rightarrow$ Server | Joins the specified room with user session, role, and media info. |
+| `room_state` | Server $\rightarrow$ Client | Authoritative room state snapshot (playback position, sequence, members, queue). |
+| `playback_sync` | Bidirectional | Synchronized play, pause, seek, and rate adjustments with monotonic `seq`. |
+| `chat_message` | Bidirectional | Instant messaging with system events (join, leave, content changes). |
+| `reaction` | Bidirectional | Broadcasts 24+ floating reaction bursts across all connected screens. |
+| `voice_signal` | Bidirectional | Peer-to-peer WebRTC audio signaling (SDP offers, answers, and ICE candidates). |
+| `countdown_tick` | Bidirectional | Synchronized 3-2-1 countdown overlay for precision assisted sync. |
+| `join_request` | Client $\rightarrow$ Server | Submits entry request to host in Host Approval mode. |
+| `join_approved` | Server $\rightarrow$ Client | Notifies guest that host approved admission. |
+| `party_ended` | Server $\rightarrow$ Client | Authoritative broadcast when host ends the party, transitioning clients to the recap view. |
+
+---
+
 ## 🩺 100% Green System Diagnostics
 
 PlayOra features built-in self-testing accessible at `/diagnostics`:
