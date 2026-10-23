@@ -3,7 +3,6 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Navbar } from "@/components/Navbar";
-import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -539,8 +538,6 @@ export default function FriendsPage() {
           </div>
         )}
       </main>
-
-      <MobileBottomNav />
     </div>
   );
 }

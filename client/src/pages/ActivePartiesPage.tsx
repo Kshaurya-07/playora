@@ -2,7 +2,6 @@ import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Navbar } from "@/components/Navbar";
-import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -199,8 +198,6 @@ export default function ActivePartiesPage() {
           </div>
         )}
       </main>
-
-      <MobileBottomNav />
     </div>
   );
 }

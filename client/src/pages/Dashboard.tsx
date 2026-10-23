@@ -164,7 +164,11 @@ export default function Dashboard() {
     let cleanCode = joinCodeInput.trim().toUpperCase();
     if (cleanCode.includes("/PARTY/")) {
       cleanCode = cleanCode.split("/PARTY/")[1]?.split("?")[0] || cleanCode;
+    } else if (cleanCode.includes("/ROOM/")) {
+      cleanCode = cleanCode.split("/ROOM/")[1]?.split("?")[0] || cleanCode;
     }
+    cleanCode = cleanCode.replace(/^\/+|\/+$/g, "").trim();
+
     if (!cleanCode) {
       toast.error("Please enter an invite code or party link");
       return;

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Navbar } from "@/components/Navbar";
-import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
@@ -256,8 +255,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </main>
-
-      <MobileBottomNav />
     </div>
   );
 }

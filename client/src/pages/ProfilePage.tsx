@@ -3,7 +3,6 @@ import { useLocation, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Navbar } from "@/components/Navbar";
-import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -410,8 +409,6 @@ export default function ProfilePage() {
           </div>
         )}
       </main>
-
-      <MobileBottomNav />
     </div>
   );
 }

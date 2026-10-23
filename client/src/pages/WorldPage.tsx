@@ -3,7 +3,6 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Navbar } from "@/components/Navbar";
-import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { CreatePartyModal } from "@/components/CreatePartyModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -537,8 +536,6 @@ export default function WorldPage() {
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
       />
-
-      <MobileBottomNav />
     </div>
   );
 }

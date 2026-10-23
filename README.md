@@ -2,7 +2,7 @@
 ### *Watch Together. Feel Every Moment.*
 
 [![CI Build & Test](https://github.com/Kshaurya-07/playora/actions/workflows/ci.yml/badge.svg)](https://github.com/Kshaurya-07/playora/actions/workflows/ci.yml)
-[![Tests Passing](https://img.shields.io/badge/Tests-40%2F40%20Passed-emerald.svg)](https://github.com/Kshaurya-07/playora)
+[![Tests Passing](https://img.shields.io/badge/Tests-41%2F41%20Passed-emerald.svg)](https://github.com/Kshaurya-07/playora)
 [![Diagnostics Health](https://img.shields.io/badge/Diagnostics-100%25%20Green-emerald.svg)](http://localhost:3000/diagnostics)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
@@ -18,7 +18,7 @@
 ## 🌟 What's New in PlayOra 2.0
 
 ### 🎯 Force Sync Engine 2.0
-- **Authoritative Sequence Timeline**: Sequential action numbering (`seq` counter) ensures synchronization commands are processed strictly in monotonic order, preventing race conditions.
+- **Authoritative Sequence Timeline**: Sequential action numbering (`seq` counter) ensures synchronization commands are processed strictly in monotonic order, eliminating out-of-order race conditions.
 - **3-Tier Adaptive Drift Compensation**:
   - **Tier 1 (< 300ms drift)**: Micro playback rate adjustments (`0.95x` - `1.05x`) without audio distortion or stuttering.
   - **Tier 2 (300ms – 2s drift)**: Smooth, gentle programmatic seeking.
@@ -26,7 +26,7 @@
 - **Network Reconnection Recovery**: Automatic timeline catch-up upon transient disconnection or network handoffs.
 
 ### 🔑 Canonical Room Identifiers & Access Control
-- **Canonical Room Format**: Standardized `PO-XXXXXX` (e.g., `PO-8K2M9X`) codes with automatic case-normalization and hyphens.
+- **Canonical Room Format**: Standardized `PO-XXXXXX` (e.g., `PO-8K2M9X`) codes with automatic case-normalization, prefix tolerance (entering `8K2M9X` resolves to `PO-8K2M9X`), and `/party/:code` or `/room/:code` routing.
 - **Multi-Tier Access Policies**:
   - 🔓 **Open**: Direct join via room link, room code, or World Discovery.
   - 🔒 **Password Protected**: Real-time room challenge with salted SHA-256 hash verification.
@@ -52,9 +52,9 @@
   - 🥺 **Emotion & Comfort**: 🥺, 😭, 💔, 🫂
 
 ### 🎨 Deep Black & Graphite Design System
-- Sleek, modern aesthetic (`#0a0a0c` dark background, `#141419` cards, emerald/indigo accents).
-- Responsive layouts tailored for **Mobile phones, Tablets, Laptops, and Ultra-wide Desktops**.
-- Touch-friendly action bars, full-screen video toggle, and collapsible side panels.
+- Sleek, modern aesthetic (`#0a0a0c` dark background, `#141419` cards, emerald/lime accents).
+- Device-specific responsive layouts tailored for **Mobile phones, Tablets, Laptops, and Ultra-wide Desktops**.
+- Single authoritative bottom navigation on mobile devices with smart auto-hide inside watch parties.
 
 ---
 
@@ -68,7 +68,7 @@ PlayOra auto-detects pasted URLs and selects the optimal playback adapter:
 | **Twitch** | 🟢 Native SDK | `TwitchAdapter` | Official Twitch Embed SDK, Live streams, VODs, Clips, isolated lifecycle |
 | **Vimeo** | 🟢 Native SDK | `VimeoAdapter` | Official Vimeo Player SDK, HD playback, programmatic timecodes & seek |
 | **Direct Video** | 🟢 Native HTML5 | `GenericHTML5Adapter` | Native `<video>`, MP4, WebM, Direct CDN links, buffer monitoring |
-| **Kick** | 🟡 Assisted Sync | `KickAdapter` | Embed player, shared synchronized timeline, 3-2-1 countdown countdown |
+| **Kick** | 🟡 Assisted Sync | `KickAdapter` | Embed player, shared synchronized timeline, 3-2-1 countdown timer |
 | **OTT Services** | 🟡 Companion Sync | `AssistedSyncAdapter` | DRM-compliant synchronized clock, "I'm Ready" check (Netflix, Prime, Disney+) |
 
 ---
@@ -147,7 +147,7 @@ Navigate to `http://localhost:3000` in your browser.
 PlayOra maintains a 100% green test suite:
 
 ```bash
-# 1. Run Vitest Unit & Integration Suites (40 tests across 6 files)
+# 1. Run Vitest Unit & Integration Suites (41 tests across 6 files)
 npm test
 
 # 2. Verify TypeScript strict type-checking
@@ -158,7 +158,7 @@ npm run build
 ```
 
 ### Test Coverage Highlights
-- `server/social-watch-party.test.ts`: Canonical room IDs, multi-tier access (open, password, host approval), 24 reactions taxonomy, World discovery filtering, and friend system.
+- `server/social-watch-party.test.ts`: Canonical room IDs, prefix tolerance (`PO-`), multi-tier access (open, password, host approval), 24 reactions taxonomy, World discovery filtering, and friend system.
 - `server/watch-party.test.ts`: Room CRUD, URL validation, playlist queue progression, and timeline state.
 - `server/account-lifecycle.test.ts`: Guest accounts, user profiles, ghost mode, and session persistence.
 - `server/realtime-presence.test.ts`: WebSocket connections, room heartbeat, member join/leave, and cleanup.

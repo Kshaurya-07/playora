@@ -43,7 +43,11 @@ export function JoinPartyModal({ isOpen, onClose }: JoinPartyModalProps) {
     let cleanCode = joinCodeInput.trim().toUpperCase();
     if (cleanCode.includes("/PARTY/")) {
       cleanCode = cleanCode.split("/PARTY/")[1]?.split("?")[0] || cleanCode;
+    } else if (cleanCode.includes("/ROOM/")) {
+      cleanCode = cleanCode.split("/ROOM/")[1]?.split("?")[0] || cleanCode;
     }
+    cleanCode = cleanCode.replace(/^\/+|\/+$/g, "").trim();
+
     if (!cleanCode) {
       toast.error("Please enter an invite code or party link");
       return;
@@ -104,7 +108,7 @@ export function JoinPartyModal({ isOpen, onClose }: JoinPartyModalProps) {
               value={joinCodeInput}
               onChange={(e) => setJoinCodeInput(e.target.value)}
               onKeyDown={handleKeyDownInput}
-              placeholder="e.g. 7K4MZ2P9 or playora.app/party/..."
+              placeholder="e.g. PO-8K2M9X or playora.app/party/..."
               className="mt-2 h-13 border-white/15 bg-black/40 text-center font-mono text-base uppercase tracking-widest text-white focus:border-[#d6ff3f]"
             />
           </div>

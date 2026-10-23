@@ -3,7 +3,6 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Navbar } from "@/components/Navbar";
-import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -210,8 +209,6 @@ export default function HistoryPage() {
           </div>
         )}
       </main>
-
-      <MobileBottomNav />
     </div>
   );
 }

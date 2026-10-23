@@ -8,7 +8,7 @@ export function MobileBottomNav() {
   const { user, isAuthenticated } = useAuth();
 
   // Hide on watch party room page to allow maximum video immersion
-  if (location.startsWith("/party/")) {
+  if (location.startsWith("/party/") || location.startsWith("/room/")) {
     return null;
   }
 

@@ -269,5 +269,36 @@ describe("PlayOra 2.0 — Social Watch Party & Real-Time Sync Engine", () => {
       expect(gamingParties.parties[0].title).toBe("Twitch Esports Finals");
       expect(gamingParties.parties[0].hostName).toBe("World Host");
     });
+
+    it("retrieves rooms seamlessly with or without PO- prefix and case-insensitively", async () => {
+      const host = db.memoryStore.upsertUser({
+        openId: "test_host_code_lookup",
+        name: "Host Lookup",
+      });
+
+      const room = await db.createRoom({
+        code: "PO-ABC890",
+        title: "Test Prefix Fallback",
+        contentUrl: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
+        hostId: host.id,
+        platform: "youtube",
+      });
+
+      // Lookup with exact code
+      const r1 = await db.getRoomByCode("PO-ABC890");
+      expect(r1?.id).toBe(room.id);
+
+      // Lookup lowercase with prefix
+      const r2 = await db.getRoomByCode("po-abc890");
+      expect(r2?.id).toBe(room.id);
+
+      // Lookup suffix only without PO-
+      const r3 = await db.getRoomByCode("ABC890");
+      expect(r3?.id).toBe(room.id);
+
+      // Lookup lowercase suffix only
+      const r4 = await db.getRoomByCode("abc890");
+      expect(r4?.id).toBe(room.id);
+    });
   });
 });

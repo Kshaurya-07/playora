@@ -365,7 +365,12 @@ class MemoryStore {
   }
 
   getRoomByCode(code: string): Room | undefined {
-    return this.roomsByCode.get(code.toUpperCase().trim());
+    const clean = code.toUpperCase().trim();
+    let r = this.roomsByCode.get(clean);
+    if (!r && !clean.startsWith("PO-")) {
+      r = this.roomsByCode.get(`PO-${clean}`);
+    }
+    return r;
   }
 
   getRoomById(id: number): Room | undefined {
@@ -1237,7 +1242,10 @@ export async function getRoomByCode(code: string): Promise<Room | undefined> {
   if (!db) return memoryStore.getRoomByCode(clean);
 
   try {
-    const res = await db.select().from(rooms).where(eq(rooms.code, clean)).limit(1);
+    let res = await db.select().from(rooms).where(eq(rooms.code, clean)).limit(1);
+    if (!res[0] && !clean.startsWith("PO-")) {
+      res = await db.select().from(rooms).where(eq(rooms.code, `PO-${clean}`)).limit(1);
+    }
     return res[0] || memoryStore.getRoomByCode(clean);
   } catch (error) {
     return memoryStore.getRoomByCode(clean);

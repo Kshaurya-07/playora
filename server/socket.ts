@@ -301,7 +301,12 @@ export function initWebSocketServer(server: HttpServer) {
         }
 
         if (type === "join_room") {
-          const roomCode = String(data.roomCode || "").toUpperCase().trim();
+          let roomCode = String(data.roomCode || "").toUpperCase().trim();
+          let room = await db.getRoomByCode(roomCode);
+          if (room) {
+            roomCode = room.code;
+          }
+
           const user = data.user || {};
           const userId = Number(user.id) || session.userId || Date.now();
           const userName = String(user.name || "Guest").trim();
@@ -325,7 +330,6 @@ export function initWebSocketServer(server: HttpServer) {
           }
           sockets.add(ws);
 
-          let room = await db.getRoomByCode(roomCode);
           if (room && room.status === "ended") {
             ws.send(
               JSON.stringify({
