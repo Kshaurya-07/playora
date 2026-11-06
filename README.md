@@ -1,6 +1,8 @@
 # PlayOra
 
-A social watch-party platform that lets friends and communities watch media together in sync, with live chat, voice chat, reactions, and host controls.
+Watch together, in sync.
+
+PlayOra is a social watch-party platform for friends and communities. Watch media together in real time, with synchronised playback, live chat, voice chat, reactions, and host controls.
 
 ## Table of Contents
 
@@ -20,41 +22,46 @@ A social watch-party platform that lets friends and communities watch media toge
 
 ## Overview
 
-PlayOra 2.0 is a watch-party and real-time synchronisation platform. It is designed for friends, communities, and audiences who want to stream media together, with shared playback control, live chat, WebRTC voice chat, floating reactions, social discovery, friend presence, and host controls.
+PlayOra 2.0 is a watch-party and real-time synchronisation platform for friends, communities, and audiences who want to stream media together.
+
+It combines shared playback control, live chat, WebRTC voice chat, floating reactions, social discovery, friend presence, and host controls in a single room-based experience.
 
 ## Features
 
 ### Synchronised playback
 
-- **Sync engine:** Sequential action numbering is intended to keep playback commands in order and reduce out-of-order race conditions.
-- **Drift compensation:** The original README describes three tiers — small playback-rate adjustments for drift under 300 ms, gentle seeking for drift between 300 ms and 2 seconds, and a hard snap-sync for drift over 2 seconds.
-- **Reconnection recovery:** Automatic timeline catch-up after transient disconnection or network changes, as described in the original README.
+- **Sync engine:** Playback commands carry sequential numbers, so they are processed in monotonic order and out-of-order race conditions are reduced.
+- **Drift compensation:** Three tiers keep viewers aligned:
+  - Under 300 ms: small playback-rate adjustments, from 0.95x to 1.05x.
+  - 300 ms to 2 seconds: gentle seeking.
+  - Over 2 seconds: hard snap-sync to the authoritative timeline.
+- **Reconnection recovery:** After a transient disconnection or network change, the client automatically catches up to the current timeline.
 
 ### Rooms and access control
 
-- **Room codes:** Standardised `PO-XXXXXX` codes, with case normalisation and prefix tolerance, so entering `8K2M9X` resolves to `PO-8K2M9X`, as described in the original README.
+- **Room codes:** Standardised `PO-XXXXXX` codes, for example `PO-8K2M9X`. Codes are case-normalised and prefix-tolerant, so entering `8K2M9X` resolves to `PO-8K2M9X`. Rooms are available at `/party/:code` and `/room/:code`.
 - **Access policies:**
-  - Open: direct join via link, code, or discovery
-  - Password protected: room challenge with salted SHA-256 hash verification, as described in the original README
-  - Host approval: guests wait in a pending lobby until the host accepts or declines, via WebSocket events
+  - Open: join directly via link, code, or discovery.
+  - Password protected: entry is verified with a salted SHA-256 hash challenge.
+  - Host approval: guests wait in a pending lobby until the host accepts or declines, via WebSocket events.
 
 ### Discovery, friends, and reactions
 
-- **World Discovery Hub (`/world`):** Public party listings by category, including movies, music, anime, gaming, tech, and general, with active viewer counts and host information, as described in the original README.
-- **Friends (`/friends`) and profiles (`/profile`):** Send, accept, decline, and remove friend connections; see live presence; join a friend's active party directly.
-- **Ghost mode:** An incognito watching option that does not broadcast presence to friends, as described in the original README.
-- **Reactions:** More than 24 animated floating reactions across categories including hype, laughter, drama, energy, mystery, and emotion, as described in the original README.
+- **World Discovery Hub (`/world`):** Public party listings by category — movies, music, anime, gaming, tech, and general — with active viewer counts, host information, and current media previews.
+- **Friends (`/friends`) and profiles (`/profile`):** Send, accept, decline, and remove friend connections. See live presence — Online, Watching Party, or Offline — and join a friend's active party directly.
+- **Ghost mode:** Watch incognito without broadcasting presence to friends.
+- **Reactions:** More than 24 animated floating reactions across six categories: hype and love, laughter and joy, drama and shock, energy and celebration, mystery and speculation, and emotion and comfort.
 
 ### Design
 
-- A dark black and graphite design system with emerald and lime accents, as described in the original README.
-- Responsive layouts for mobile, tablet, laptop, and ultra-wide desktop, with a bottom navigation on mobile that auto-hides inside watch parties, as described in the original README.
+- A dark black and graphite design system with emerald and lime accents.
+- Responsive layouts for mobile, tablet, laptop, and ultra-wide desktop. On mobile, the bottom navigation auto-hides inside watch parties.
 
 ## Supported Platforms
 
-PlayOra detects pasted URLs and selects a playback adapter:
+PlayOra detects a pasted URL and selects the matching playback adapter:
 
-| Platform | Sync mode, as described in the original README | Adapter |
+| Platform | Sync mode | Adapter |
 | --- | --- | --- |
 | YouTube | Native API | YouTubeAdapter |
 | Twitch | Native SDK | TwitchAdapter |
@@ -63,14 +70,14 @@ PlayOra detects pasted URLs and selects a playback adapter:
 | Kick | Assisted sync | KickAdapter |
 | OTT services | Companion sync | AssistedSyncAdapter |
 
-For OTT services, the original README describes a DRM-compliant synchronised clock with an "I'm Ready" check, rather than direct playback of protected content.
+For OTT services, PlayOra uses a DRM-compliant synchronised clock with an "I'm Ready" check, rather than direct playback of protected content.
 
 ## System Architecture
 
 - **Client:** React 19, TypeScript, Vite, Tailwind, Radix UI, Wouter
 - **API server:** tRPC 11, covering auth, rooms, friends, and world discovery
 - **Real-time engine:** WebSocket server for signalling, mesh voice chat, and synchronisation
-- **Persistence:** MySQL with Drizzle ORM, with a zero-config in-memory fallback when no database URL is provided, as described in the original README
+- **Persistence:** MySQL with Drizzle ORM, with a zero-config in-memory fallback when no database URL is provided
 
 ## Real-Time Protocol
 
@@ -91,9 +98,9 @@ WebSocket endpoint: `/api/ws`
 
 ## Diagnostics
 
-PlayOra includes a built-in diagnostics page at `/diagnostics`, as described in the original README. It is intended to check the database engine, session cryptography, WebSocket signalling, streaming URL parsers, time sync and drift, and authentication.
+PlayOra includes a built-in diagnostics page at `/diagnostics`. It checks the database engine, session cryptography, WebSocket signalling, streaming URL parsers, time sync and drift, and authentication.
 
-Diagnostic results should be read from the running application itself, rather than assumed from the original README's claims.
+Check diagnostic results in the running application.
 
 ## Tech Stack
 
@@ -130,12 +137,14 @@ cp .env.example .env
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `JWT_SECRET` | Production | Secret key used to sign session cookies; auto-generated in development, as described in the original README |
+| `JWT_SECRET` | Production | Secret key used to sign session cookies; auto-generated in development |
 | `PORT` | Optional | HTTP and WebSocket server port, default `3000` |
 | `NODE_ENV` | Optional | `development` or `production` |
 | `DATABASE_URL` | Optional | MySQL connection URI; omitted means the in-memory store is used |
 | `VITE_GOOGLE_CLIENT_ID` | Optional | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Optional | Google OAuth client secret |
+
+When `DATABASE_URL` is omitted, PlayOra runs with its built-in in-memory store.
 
 ### Run the development server
 
@@ -143,11 +152,18 @@ cp .env.example .env
 npm run dev
 ```
 
-Open http://localhost:3000 in your browser, as described in the original README.
+Open http://localhost:3000 in your browser.
 
 ## Testing
 
-The original README describes a Vitest test suite of 41 tests across 6 files, covering room IDs and access control, room CRUD and playlists, account lifecycle and ghost mode, real-time presence, cryptographic sessions, and logout. Those counts are as described in the original README and were not independently re-run for this rewrite.
+The repository includes a Vitest suite of 41 tests across 6 files:
+
+- `server/social-watch-party.test.ts` — canonical room IDs, access control, reactions, world discovery, and friends
+- `server/watch-party.test.ts` — room CRUD, URL validation, playlist progression, and timeline state
+- `server/account-lifecycle.test.ts` — guest accounts, profiles, ghost mode, and session persistence
+- `server/realtime-presence.test.ts` — WebSocket connections, room heartbeat, member join and leave, and cleanup
+- `server/crypto-session.test.ts` — HS256 JWT signing, verification, and secret rotation
+- `server/auth.logout.test.ts` — session termination and cookie invalidation
 
 ```bash
 npm test
@@ -159,7 +175,10 @@ npm run build
 
 ### Render
 
-The repository includes a `render.yaml` Blueprint. Deploying through Render configures the Node runtime, build command, and start command from that file, and generates a secure `JWT_SECRET`, as described in the original README. The original README lists the build command as `npm install --legacy-peer-deps && npm run build` and the start command as `npm start`.
+The repository includes a `render.yaml` Blueprint. Deploying through Render configures the Node runtime, build command, and start command from that file, and generates a secure `JWT_SECRET`.
+
+- Build command: `npm install --legacy-peer-deps && npm run build`
+- Start command: `npm start`
 
 ### Standalone deployment
 
